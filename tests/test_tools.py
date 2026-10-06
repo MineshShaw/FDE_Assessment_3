@@ -17,14 +17,14 @@ def test_check_budget_reports_remaining_funds_and_unknown_department() -> None:
     result = check_budget("Marketing", 5000)
     assert result["remaining_funds"] == 10000
     assert result["within_budget"] is True
-    assert check_budget("Unknown", 1) == {"error": "Not found", "department": "Unknown"}
+    assert check_budget("Unknown", 1) == {"status": "not found", "department": "Unknown"}
 
 
 def test_catalog_search_matches_category_and_need() -> None:
     results = search_software_catalog("campaign task tracker", "Project Management")
-    assert len(results) <= 3
+    assert len(results) <= 2
     assert any(row["name"] == "TaskFlow" for row in results)
-    assert set(results[0]) == {"name", "category"}
+    assert set(results[0]) == {"name", "desc"}
 
 
 def test_vendor_security_status_uses_mock_service_and_handles_unknown_vendors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -42,7 +42,14 @@ def test_vendor_security_status_uses_mock_service_and_handles_unknown_vendors(mo
     assert result["security_status"] == "Approved"
     assert result["security_review_status"] == "approved"
     assert result["risk_service_available"] is True
-    assert get_vendor_security_status("No Such Vendor")["error"] == "Not found"
+    assert get_vendor_security_status("No Such Vendor")["status"] == "not found"
+
+
+def test_tools_return_error_envelopes_for_invalid_inputs() -> None:
+    assert "error" in check_budget("", 1)
+    assert "error" in search_software_catalog(None, "Project Management")
+    assert "error" in get_vendor_security_status("")
+    assert "error" in evaluate_policy_rules(-1, "low", "internal")
 
 
 def test_policy_rules_apply_cfo_and_sensitive_data_requirements() -> None:
@@ -54,8 +61,7 @@ def test_policy_rules_apply_cfo_and_sensitive_data_requirements() -> None:
 
 @pytest.mark.parametrize("amount", [-1, float("nan")])
 def test_tools_reject_invalid_amounts(amount: float) -> None:
-    with pytest.raises(ValueError):
-        check_budget("Marketing", amount)
+    assert "error" in check_budget("Marketing", amount)
 
 
 def test_procurement_output_uses_unified_literal_contract() -> None:

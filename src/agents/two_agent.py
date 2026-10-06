@@ -42,12 +42,27 @@ def _run_analyst(request: str) -> StructuredEvidencePack:
     iteration = 0
     while iteration < MAX_ITERATIONS:
         iteration += 1
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=messages,
-            tools=TOOL_SCHEMAS[:3],
-            tool_choice="none" if iteration == MAX_ITERATIONS - 1 else "auto",
-        )
+        bailout = iteration == MAX_ITERATIONS - 1
+        if bailout:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "SYSTEM ALERT: Maximum tool iterations reached. You must immediately output "
+                        "your final JSON based on the context you have gathered so far. Do not call "
+                        "any more tools."
+                    ),
+                }
+            )
+        request_kwargs = {
+            "model": MODEL_NAME,
+            "messages": messages,
+        }
+        if not bailout:
+            request_kwargs.update({"tools": TOOL_SCHEMAS[:3], "tool_choice": "auto"})
+        else:
+            request_kwargs["tool_choice"] = "none"
+        response = client.chat.completions.create(**request_kwargs)
         message = message_from_response(response)
         tool_calls = value(message, "tool_calls", None)
         append_assistant_message(messages, message)
