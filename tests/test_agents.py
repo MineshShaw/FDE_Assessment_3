@@ -132,7 +132,9 @@ def test_single_agent_executes_tool_then_parses_output(monkeypatch: pytest.Monke
     assert result.recommendation == "APPROVE"
     assert len(calls) == 2
     assert calls[1]["messages"][-1]["role"] == "tool"
-    assert calls[1]["response_format"] == {"type": "json_object"}
+    assert calls[1]["tool_choice"] == "auto"
+    assert calls[1].get("response_format") is None
+    assert calls[0].get("response_format") is None
 
 
 def test_single_agent_retries_invalid_final_json(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -258,4 +260,48 @@ def test_two_agent_analyst_loop_and_reviewer_parse(monkeypatch: pytest.MonkeyPat
     assert "Original Request:" in calls[-1]["messages"][1]["content"]
     assert "Evidence Pack from Analyst:" in calls[-1]["messages"][1]["content"]
     assert "Deterministic policy result" in calls[-1]["messages"][1]["content"]
+    assert calls[-1]["tool_choice"] == "none"
     assert calls[-1]["response_format"] == {"type": "json_object"}
+
+
+def test_two_agent_retries_invalid_analyst_evidence_pack(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = iter(
+        [
+            _response({"content": '{"budget_status": [], "tool_overlap": [], "vendor_risk": {}}', "tool_calls": None}),
+            _response(
+                {
+                    "content": json.dumps(
+                        {
+                            "budget_status": {"amount": 5000},
+                            "tool_overlap": [],
+                            "vendor_risk": {"risk_level": "low"},
+                        }
+                    ),
+                    "tool_calls": None,
+                }
+            ),
+            _response(
+                {
+                    "content": json.dumps(
+                        {
+                            "recommendation": "REQUEST_INFO",
+                            "next_step": "Review the request.",
+                        }
+                    ),
+                    "tool_calls": None,
+                }
+            ),
+        ]
+    )
+    calls = []
+    original = _mock_client(responses)
+    original.chat.completions.create = lambda **kwargs: calls.append(deepcopy(kwargs)) or next(responses)
+    monkeypatch.setattr(two_agent, "client", original)
+
+    result = two_agent.run_two_agent("Marketing requests a procurement decision.")
+
+    assert result.recommendation == "REQUEST_INFO"
+    assert calls[0].get("response_format") is None
+    assert calls[1]["tool_choice"] == "none"
+    assert calls[1]["response_format"] == {"type": "json_object"}
+    assert "failed validation" in calls[1]["messages"][-1]["content"]

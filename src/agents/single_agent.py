@@ -65,7 +65,7 @@ def run_single_agent(request: str) -> ProcurementOutput:
             request_kwargs.update({"tools": TOOL_SCHEMAS, "tool_choice": "auto"})
         else:
             request_kwargs["tool_choice"] = "none"
-        if bailout or any(message.get("role") == "tool" for message in messages):
+        if request_kwargs.get("tool_choice") == "none":
             request_kwargs["response_format"] = {"type": "json_object"}
         request_kwargs["messages"] = sanitize_messages(messages)
         response = client.chat.completions.create(**request_kwargs)

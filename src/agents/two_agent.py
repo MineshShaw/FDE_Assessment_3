@@ -65,7 +65,7 @@ def _run_analyst(request: str) -> StructuredEvidencePack:
             request_kwargs.update({"tools": TOOL_SCHEMAS[:3], "tool_choice": "auto"})
         else:
             request_kwargs["tool_choice"] = "none"
-        if bailout or any(message.get("role") == "tool" for message in messages):
+        if request_kwargs.get("tool_choice") == "none":
             request_kwargs["response_format"] = {"type": "json_object"}
         request_kwargs["messages"] = sanitize_messages(messages)
         response = client.chat.completions.create(**request_kwargs)
@@ -82,7 +82,33 @@ def _run_analyst(request: str) -> StructuredEvidencePack:
                     }
                 )
             continue
-        return parse_model(value(message, "content"), StructuredEvidencePack)
+        validation_error: Exception | None = None
+        for attempt in range(MAX_VALIDATION_RETRIES + 1):
+            try:
+                return parse_model(value(message, "content"), StructuredEvidencePack)
+            except (ValidationError, ValueError) as exc:
+                validation_error = exc
+                if attempt == MAX_VALIDATION_RETRIES:
+                    raise
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your last response failed validation. Fix these exact JSON errors and "
+                            f"return the corrected StructuredEvidencePack JSON object: {exc}"
+                        ),
+                    }
+                )
+                retry_response = client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=sanitize_messages(messages),
+                    tool_choice="none",
+                    response_format={"type": "json_object"},
+                )
+                retry_message = message_from_response(retry_response)
+                append_assistant_message(messages, retry_message)
+                message = retry_message
+        raise RuntimeError(f"Analyst output validation failed: {validation_error}")
     raise RuntimeError(f"Analyst orchestration exceeded {MAX_ITERATIONS} iterations")
 
 
@@ -123,6 +149,7 @@ def run_two_agent(request: str) -> ProcurementOutput:
     response = client.chat.completions.create(
         model=MODEL_NAME,
         messages=sanitize_messages(reviewer_messages),
+        tool_choice="none",
         response_format={"type": "json_object"},
     )
     message = message_from_response(response)
