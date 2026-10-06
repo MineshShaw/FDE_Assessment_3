@@ -1,0 +1,53 @@
+from __future__ import annotations
+
+import pytest
+
+from src.schemas import ProcurementOutput
+from src.tools import (
+    check_budget,
+    evaluate_policy_rules,
+    get_vendor_security_status,
+    search_software_catalog,
+)
+
+
+def test_check_budget_reports_remaining_funds_and_unknown_department() -> None:
+    result = check_budget("Marketing", 5000)
+    assert result["remaining_funds"] == 10000
+    assert result["within_budget"] is True
+    assert check_budget("Unknown", 1)["found"] is False
+
+
+def test_catalog_search_matches_category_and_need() -> None:
+    results = search_software_catalog("campaign task tracker", "Project Management")
+    assert any(row["product_name"] == "TaskFlow" for row in results)
+
+
+def test_vendor_security_status_handles_known_and_unknown_vendors() -> None:
+    result = get_vendor_security_status("CodeMate")
+    assert result["security_status"] == "Approved"
+    assert result["security_review_status"] == "approved"
+    assert get_vendor_security_status("No Such Vendor")["found"] is False
+
+
+def test_policy_rules_apply_cfo_and_sensitive_data_requirements() -> None:
+    result = evaluate_policy_rules(30000, "high", "customer_pii")
+    assert result["requires_cfo_approval"] is True
+    assert {"CFO", "Security", "Privacy"} <= set(result["approvals_required"])
+    assert "high_vendor_risk" in result["risk_flags"]
+
+
+@pytest.mark.parametrize("amount", [-1, float("nan")])
+def test_tools_reject_invalid_amounts(amount: float) -> None:
+    with pytest.raises(ValueError):
+        check_budget("Marketing", amount)
+
+
+def test_procurement_output_uses_unified_literal_contract() -> None:
+    output = ProcurementOutput(
+        recommendation="REQUEST_INFO",
+        evidence=["Annual cost is missing"],
+        missing_information=["annual cost"],
+        next_step="Ask the requester for the annual cost.",
+    )
+    assert output.recommendation == "REQUEST_INFO"
