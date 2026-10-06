@@ -37,9 +37,9 @@ def _golden_output(case: dict[str, Any]) -> str:
     return json.dumps(
         {
             "recommendation": case["expected_recommendation"],
-            "evidence": ["Benchmark evidence collected"],
+            "evidence": ["Tool result evidence collected"],
             "approvals_required": ["Human reviewer"],
-            "missing_information": [],
+            "missing_information": ["material request details"] if case["expected_recommendation"] == "REQUEST_INFO" else [],
             "risk_flags": [],
             "next_step": "Review the evidence and complete human approval.",
         }
@@ -54,11 +54,15 @@ class OfflineClient:
         self.staged = staged
         self.calls = 0
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+        self.last_tool_result = ""
 
     def create(self, **kwargs: Any) -> SimpleNamespace:
         self.calls += 1
         messages = kwargs["messages"]
         has_tool_result = any(message.get("role") == "tool" for message in messages)
+        for message in messages:
+            if message.get("role") == "tool":
+                self.last_tool_result = message.get("content", "")
         if not has_tool_result and kwargs.get("tools"):
             call = _tool_call(
                 "check_budget",
@@ -75,16 +79,21 @@ class OfflineClient:
                     }
                 )
             )
-        return _message(content=_golden_output(self.case))
+        output = json.loads(_golden_output(self.case))
+        if self.last_tool_result:
+            output["evidence"] = [f"Tool result: {self.last_tool_result}"]
+        return _message(content=json.dumps(output))
 
 
-def _instrument_tools(counter: dict[str, int]) -> dict[str, Any]:
+def _instrument_tools(counter: dict[str, Any]) -> dict[str, Any]:
     original = dict(_common.TOOL_FUNCTIONS)
 
     def counted(name: str, function: Any) -> Any:
         def wrapper(**kwargs: Any) -> Any:
             counter["tool_calls"] += 1
-            return function(**kwargs)
+            result = function(**kwargs)
+            counter["tool_results"].append(json.dumps(result, default=str))
+            return result
 
         return wrapper
 
@@ -95,7 +104,7 @@ def _instrument_tools(counter: dict[str, int]) -> dict[str, Any]:
 
 
 def _run_case(case: dict[str, Any], architecture: str) -> dict[str, Any]:
-    counter = {"tool_calls": 0}
+    counter = {"tool_calls": 0, "tool_results": []}
     original_tools = _instrument_tools(counter)
     staged = architecture == "staged"
     module = two_agent if staged else single_agent
@@ -109,12 +118,34 @@ def _run_case(case: dict[str, Any], architecture: str) -> dict[str, Any]:
         parsed = output if isinstance(output, ProcurementOutput) else ProcurementOutput.model_validate(output)
         error = None
         llm_calls = module.client.calls if offline else None
-        passed = parsed.recommendation == case["expected_recommendation"]
+        evidence_text = " ".join(parsed.evidence).casefold()
+        tool_text = " ".join(counter["tool_results"]).casefold()
+        evidence_grounded = bool(parsed.evidence) and (
+            "tool result" in evidence_text
+            or any(term in evidence_text for term in tool_text.split() if len(term) > 4)
+        )
+        policy_rules_followed = bool(parsed.approvals_required) or bool(parsed.missing_information)
+        human_review_correct = parsed.recommendation in {
+            "ESCALATE_TO_HUMAN",
+            "REQUEST_INFO",
+        }
+        next_action_present = bool(parsed.next_step.strip())
+        passed = (
+            parsed.recommendation == case["expected_recommendation"]
+            and evidence_grounded
+            and policy_rules_followed
+            and human_review_correct
+            and next_action_present
+        )
     except Exception as exc:
         parsed = None
         error = f"{type(exc).__name__}: {exc}"
         llm_calls = getattr(module.client, "calls", None)
         passed = False
+        evidence_grounded = False
+        policy_rules_followed = False
+        human_review_correct = False
+        next_action_present = False
     finally:
         module.client = original_client
         _common.TOOL_FUNCTIONS = original_tools
@@ -124,6 +155,10 @@ def _run_case(case: dict[str, Any], architecture: str) -> dict[str, Any]:
         "passed": passed,
         "expected_recommendation": case["expected_recommendation"],
         "actual_recommendation": parsed.recommendation if parsed else None,
+        "evidence_grounded": evidence_grounded,
+        "policy_rules_followed": policy_rules_followed,
+        "human_review_correct": human_review_correct,
+        "next_action_present": next_action_present,
         "llm_calls": llm_calls,
         "tool_calls": counter["tool_calls"],
         "latency_ms": round((time.perf_counter() - start) * 1000, 2),
