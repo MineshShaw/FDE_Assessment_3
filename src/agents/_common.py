@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 from pydantic import BaseModel
+from src.llm_client import format_assistant_message
 
 from src.tools import (
     check_budget,
@@ -121,19 +122,4 @@ def execute_tool_call(tool_call: Any) -> str:
 
 
 def append_assistant_message(messages: list[dict], message: Any) -> None:
-    tool_calls = value(message, "tool_calls", None)
-    content = value(message, "content", None)
-    assistant: dict[str, Any] = {"role": "assistant", "content": content}
-    if tool_calls:
-        assistant["tool_calls"] = [
-            {
-                "id": value(call, "id"),
-                "type": "function",
-                "function": {
-                    "name": value(value(call, "function", {}), "name"),
-                    "arguments": value(value(call, "function", {}), "arguments", "{}"),
-                },
-            }
-            for call in tool_calls
-        ]
-    messages.append(assistant)
+    messages.append(format_assistant_message(message))
