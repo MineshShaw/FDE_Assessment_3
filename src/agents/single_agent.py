@@ -12,7 +12,7 @@ from src.llm_client import MODEL_NAME, client
 from src.schemas import ProcurementOutput
 
 
-MAX_ITERATIONS = 5
+MAX_ITERATIONS = 10
 
 
 def run_single_agent(request: str) -> ProcurementOutput:
@@ -29,6 +29,8 @@ def run_single_agent(request: str) -> ProcurementOutput:
                 "You MUST output a valid JSON object matching this exact schema. Do NOT output tool "
                 "variables like 'approved' or 'amount'. Map your final decision strictly to the "
                 "'recommendation' key (choose from: APPROVE, REJECT, ESCALATE_TO_HUMAN, REQUEST_INFO).\n"
+                "Call each relevant evidence tool at most once. Do not repeat tool calls. Once you "
+                "receive tool responses, immediately synthesize the final JSON and stop calling tools.\n"
                 '{"recommendation": "APPROVE | REJECT | ESCALATE_TO_HUMAN | REQUEST_INFO", '
                 '"evidence": ["..."], "approvals_required": ["..."], "missing_information": [], '
                 '"risk_flags": [], "next_step": "..."}'
@@ -44,7 +46,7 @@ def run_single_agent(request: str) -> ProcurementOutput:
             model=MODEL_NAME,
             messages=messages,
             tools=TOOL_SCHEMAS,
-            tool_choice="auto",
+            tool_choice="none" if iteration == MAX_ITERATIONS - 1 else "auto",
         )
         message = message_from_response(response)
         tool_calls = value(message, "tool_calls", None)

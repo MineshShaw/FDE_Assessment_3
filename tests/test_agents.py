@@ -104,8 +104,46 @@ def test_single_agent_has_a_hard_iteration_cap(monkeypatch: pytest.MonkeyPatch) 
     )
     monkeypatch.setattr(single_agent, "client", mock_client)
 
-    with pytest.raises(RuntimeError, match="exceeded 5"):
+    with pytest.raises(RuntimeError, match="exceeded 10"):
         single_agent.run_single_agent("Keep gathering evidence.")
+
+
+def test_single_agent_forces_tool_termination_before_final_iteration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+    final_output = _response(
+        {
+            "content": json.dumps(
+                {
+                    "recommendation": "REQUEST_INFO",
+                    "next_step": "Ask for missing details.",
+                }
+            ),
+            "tool_calls": None,
+        }
+    )
+    tool_output = _response(
+        {
+            "content": None,
+            "tool_calls": [_tool_call("check_budget", {"department_id": "Marketing", "amount": 1})],
+        }
+    )
+
+    def create(**kwargs):
+        calls.append(kwargs)
+        return final_output if kwargs["tool_choice"] == "none" else tool_output
+
+    monkeypatch.setattr(
+        single_agent,
+        "client",
+        SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
+    )
+    result = single_agent.run_single_agent("A request that needs evidence.")
+
+    assert result.recommendation == "REQUEST_INFO"
+    assert calls[-1]["tool_choice"] == "none"
+    assert len(calls) == 9
 
 
 def test_two_agent_analyst_loop_and_reviewer_parse(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -15,7 +15,7 @@ from src.schemas import ProcurementOutput, StructuredEvidencePack
 from src.tools import evaluate_policy_rules
 
 
-MAX_ITERATIONS = 5
+MAX_ITERATIONS = 10
 
 
 def _run_analyst(request: str) -> StructuredEvidencePack:
@@ -30,6 +30,10 @@ def _run_analyst(request: str) -> StructuredEvidencePack:
                 "You MUST output a valid JSON object matching this exact schema. Do NOT output tool "
                 "variables like 'approved' or 'amount'. Map your final decision strictly to the "
                 "'recommendation' key (choose from: APPROVE, REJECT, ESCALATE_TO_HUMAN, REQUEST_INFO).\n"
+                "You must only call search_software_catalog, check_budget, and "
+                "get_vendor_security_status exactly once. Do not repeat tool calls. Once you "
+                "receive the tool responses, you MUST immediately synthesize the StructuredEvidencePack "
+                "as a raw JSON object and stop calling tools.\n"
                 '{"budget_status": {}, "tool_overlap": [], "vendor_risk": {}}'
             ),
         },
@@ -42,7 +46,7 @@ def _run_analyst(request: str) -> StructuredEvidencePack:
             model=MODEL_NAME,
             messages=messages,
             tools=TOOL_SCHEMAS[:3],
-            tool_choice="auto",
+            tool_choice="none" if iteration == MAX_ITERATIONS - 1 else "auto",
         )
         message = message_from_response(response)
         tool_calls = value(message, "tool_calls", None)
