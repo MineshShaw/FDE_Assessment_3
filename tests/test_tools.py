@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import pytest
+import requests
 
 from src.schemas import ProcurementOutput
+import src.tools as tools
 from src.tools import (
     check_budget,
     evaluate_policy_rules,
@@ -23,10 +25,21 @@ def test_catalog_search_matches_category_and_need() -> None:
     assert any(row["product_name"] == "TaskFlow" for row in results)
 
 
-def test_vendor_security_status_handles_known_and_unknown_vendors() -> None:
+def test_vendor_security_status_uses_mock_service_and_handles_unknown_vendors(monkeypatch: pytest.MonkeyPatch) -> None:
+    def mock_vendor_risk(vendor_name: str, timeout_seconds: float) -> dict:
+        if vendor_name == "No Such Vendor":
+            raise requests.HTTPError("not found")
+        return {
+            "vendor_name": vendor_name,
+            "security_review_status": "approved",
+            "last_review_date": "2026-08-20",
+        }
+
+    monkeypatch.setattr(tools, "get_vendor_risk", mock_vendor_risk)
     result = get_vendor_security_status("CodeMate")
     assert result["security_status"] == "Approved"
     assert result["security_review_status"] == "approved"
+    assert result["risk_service_available"] is True
     assert get_vendor_security_status("No Such Vendor")["found"] is False
 
 

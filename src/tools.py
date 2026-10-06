@@ -4,8 +4,10 @@ from datetime import date
 from numbers import Real
 
 import pandas as pd
+import requests
 
 from src.data_loader import load_all_data
+from src.vendor_client import get_vendor_risk
 
 
 REFERENCE_DATE = date(2026, 9, 30)
@@ -71,7 +73,7 @@ def search_software_catalog(need_description: str, category: str) -> list[dict]:
 
 
 def get_vendor_security_status(vendor_name: str) -> dict:
-    """Return internal vendor security status and available risk-service fields."""
+    """Return registry data enriched by the mock vendor-risk service when available."""
     if not isinstance(vendor_name, str) or not vendor_name.strip():
         raise ValueError("vendor_name must be a non-empty string")
     name = vendor_name.strip()
@@ -80,7 +82,13 @@ def get_vendor_security_status(vendor_name: str) -> dict:
     registry = vendors[vendors["vendor_name"].astype(str).str.casefold() == name.casefold()]
     risk = data["vendor_risk"]
     risk_match = risk[risk["vendor_name"].astype(str).str.casefold() == name.casefold()]
-    if registry.empty and risk_match.empty:
+    api_risk: dict | None = None
+    try:
+        api_risk = get_vendor_risk(name, timeout_seconds=0.5)
+    except requests.RequestException:
+        pass
+
+    if registry.empty and risk_match.empty and api_risk is None:
         return {"vendor_name": name, "found": False, "security_status": "unknown"}
 
     result: dict = {"vendor_name": name, "found": True}
@@ -94,7 +102,10 @@ def get_vendor_security_status(vendor_name: str) -> dict:
                 "legal_terms_status": str(row["legal_terms_status"]),
             }
         )
-    if not risk_match.empty:
+    if api_risk is not None:
+        result.update(api_risk)
+        result["risk_service_available"] = True
+    elif not risk_match.empty:
         row = risk_match.iloc[0]
         for field in ("risk_level", "security_review_status", "last_review_date", "processes_personal_data", "stores_data_outside_region", "notes"):
             if field in row.index and not pd.isna(row[field]):
