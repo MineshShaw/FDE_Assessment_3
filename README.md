@@ -28,12 +28,13 @@ python evaluation/evaluator.py
 
 ## Configuration
 
-The standard OpenAI Python SDK is configured for Gemini's OpenAI-compatible endpoint:
+The standard OpenAI Python SDK is configured for Groq's OpenAI-compatible endpoint:
 
 ```dotenv
 OPENAI_API_KEY=your-key
-MODEL_NAME="gemini-2.0-flash"
-OPENAI_BASE_URL="https://generativelanguage.googleapis.com/v1beta/openai/"
+GROQ_API_KEY=your-groq-key
+MODEL_NAME="llama-3.3-70b-versatile"
+OPENAI_BASE_URL="https://api.groq.com/openai/v1"
 ```
 
 `.env` is ignored by Git and loaded without overwriting environment variables already set by the operating system. Never commit credentials.

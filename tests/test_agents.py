@@ -7,7 +7,6 @@ from types import SimpleNamespace
 import pytest
 
 from src.agents import single_agent, two_agent
-from src.llm_client import format_assistant_message
 
 
 def _response(message: dict) -> SimpleNamespace:
@@ -28,30 +27,21 @@ def _mock_client(responses):
     return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
 
 
-def test_format_assistant_message_preserves_nested_provider_metadata() -> None:
-    function = SimpleNamespace(
-        name="check_budget",
-        arguments="{}",
-        model_extra={"function_signature": "function-token"},
-    )
-    tool_call = SimpleNamespace(
-        id="call-1",
-        type="function",
-        function=function,
-        model_extra={"thought_signature": "tool-token"},
-    )
-    message = SimpleNamespace(
-        role="assistant",
-        content=None,
-        tool_calls=[tool_call],
-        model_extra={"thought_signature": "message-token"},
+def test_standard_assistant_message_is_appended_for_tool_loop() -> None:
+    from src.agents._common import append_assistant_message
+
+    messages = []
+    append_assistant_message(
+        messages,
+        SimpleNamespace(
+            role="assistant",
+            content=None,
+            tool_calls=[_tool_call("check_budget", {})],
+        ),
     )
 
-    formatted = format_assistant_message(message)
-
-    assert formatted["thought_signature"] == "message-token"
-    assert formatted["tool_calls"][0]["thought_signature"] == "tool-token"
-    assert formatted["tool_calls"][0]["function"]["function_signature"] == "function-token"
+    assert messages[0]["role"] == "assistant"
+    assert messages[0]["tool_calls"][0]["function"]["name"] == "check_budget"
 
 
 def test_single_agent_executes_tool_then_parses_output(monkeypatch: pytest.MonkeyPatch) -> None:
