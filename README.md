@@ -22,7 +22,7 @@ For validation without the UI:
 
 ```bash
 python verify_setup.py
-pytest
+python -m pytest
 python evaluation/evaluator.py
 ```
 
