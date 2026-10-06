@@ -1,0 +1,11 @@
+# Architecture Decision Memo
+
+**Decision:** Ship the staged two-agent architecture as the production direction, with the single-agent flow retained as a simpler fallback.
+
+**Evidence:** The initial benchmark in `evaluation/benchmark_results.json` ran 10 edge cases through each architecture in offline-stub mode. Both achieved 10/10 golden-label matches. The single-agent flow averaged 2 LLM calls and 1 tool execution per case; the staged flow averaged 3 LLM calls and 1 tool execution. Despite the extra reviewer call, staged latency averaged 13.80 ms versus 14.16 ms for single in this local run. These timings measure orchestration overhead, not remote model latency, so production measurements should be repeated with the configured provider.
+
+**Why staged:** The Analyst is responsible for gathering budget, catalog-overlap, and vendor-risk evidence. The Reviewer receives a structured evidence pack and applies deterministic policy rules before producing the unified output. This boundary makes evidence and policy application easier to inspect, test, and change independently. It also reduces the chance that a single conversational turn both invents evidence and makes the approval recommendation. The pure-Python `while` loops are explicit and capped at five iterations, preventing unbounded tool-call loops.
+
+**Tradeoff:** Single-agent is cheaper and operationally simpler, with fewer model calls and fewer failure points. It is appropriate for low-risk internal requests or as a fallback when latency/cost is the priority. Staged adds one model call and a handoff schema, but the stronger separation of evidence collection from review is more valuable for procurement decisions involving budget exceptions, PII, expired assessments, prompt injection, or unavailable tools.
+
+**Guardrails:** Pandas tools provide deterministic data access; policy thresholds remain outside the model. Outputs are validated with Pydantic, missing or conflicting evidence is surfaced, and the UI preserves human approval. The benchmark is an initial signal rather than a statistical performance claim; future evaluation should include real API latency, retries, token cost, and hidden cases.
