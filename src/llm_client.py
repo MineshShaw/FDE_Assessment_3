@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from typing import Any
 
+from dotenv import load_dotenv
 from openai import OpenAI
+
+
+load_dotenv()
 
 
 def sanitize_messages(messages: list) -> list:
@@ -53,16 +56,22 @@ def sanitize_messages(messages: list) -> list:
 
 
 def extract_json_from_chatty_response(raw_text: str) -> dict:
-    """Extract a JSON object from model prose without leaking parser exceptions."""
+    """Extract the first valid JSON object from model prose."""
     if not isinstance(raw_text, str):
-        return {"error": "LLM response was not text"}
-    match = re.search(r"(\{.*\})", raw_text, re.DOTALL)
-    candidate = match.group(1) if match else raw_text.strip()
-    try:
-        payload = json.loads(candidate)
-    except (json.JSONDecodeError, TypeError):
-        return {"error": "LLM response did not contain valid JSON", "raw_response": raw_text[:500]}
-    return payload if isinstance(payload, dict) else {"error": "LLM response JSON was not an object"}
+        return {"recommendation": "ESCALATE_TO_HUMAN", "error": "Unparseable LLM output"}
+
+    decoder = json.JSONDecoder()
+    for index, character in enumerate(raw_text):
+        if character != "{":
+            continue
+        try:
+            payload, _ = decoder.raw_decode(raw_text[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+
+    return {"recommendation": "ESCALATE_TO_HUMAN", "error": "Unparseable LLM output"}
 
 
 def create_client() -> OpenAI:
