@@ -17,12 +17,14 @@ def test_check_budget_reports_remaining_funds_and_unknown_department() -> None:
     result = check_budget("Marketing", 5000)
     assert result["remaining_funds"] == 10000
     assert result["within_budget"] is True
-    assert check_budget("Unknown", 1)["found"] is False
+    assert check_budget("Unknown", 1) == {"error": "Not found", "department": "Unknown"}
 
 
 def test_catalog_search_matches_category_and_need() -> None:
     results = search_software_catalog("campaign task tracker", "Project Management")
-    assert any(row["product_name"] == "TaskFlow" for row in results)
+    assert len(results) <= 3
+    assert any(row["name"] == "TaskFlow" for row in results)
+    assert set(results[0]) == {"name", "category", "vendor"}
 
 
 def test_vendor_security_status_uses_mock_service_and_handles_unknown_vendors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -40,7 +42,7 @@ def test_vendor_security_status_uses_mock_service_and_handles_unknown_vendors(mo
     assert result["security_status"] == "Approved"
     assert result["security_review_status"] == "approved"
     assert result["risk_service_available"] is True
-    assert get_vendor_security_status("No Such Vendor")["found"] is False
+    assert get_vendor_security_status("No Such Vendor")["error"] == "Not found"
 
 
 def test_policy_rules_apply_cfo_and_sensitive_data_requirements() -> None:

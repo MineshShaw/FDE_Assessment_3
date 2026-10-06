@@ -22,8 +22,10 @@ def run_single_agent(request: str) -> ProcurementOutput:
         {
             "role": "system",
             "content": (
-                "You are a procurement analyst. Use tools for evidence and return only JSON "
-                "matching ProcurementOutput once you have enough evidence."
+                "You are an analytical agent. Call the provided tools to gather evidence. "
+                "Once you have sufficient evidence, DO NOT call any more tools. You must output "
+                "your final decision as a raw JSON object matching the ProcurementOutput schema. "
+                "Do not include markdown formatting, code blocks, or explanatory text outside the JSON."
             ),
         },
         {"role": "user", "content": request},

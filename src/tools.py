@@ -34,23 +34,15 @@ def check_budget(department_id: str, amount: float) -> dict:
     budgets = _data()["budgets"]
     match = budgets[budgets["department"].astype(str).str.casefold() == department_id.casefold()]
     if match.empty:
-        return {
-            "department": department_id,
-            "amount": amount,
-            "found": False,
-            "within_budget": False,
-            "remaining_funds": None,
-        }
+        return {"error": "Not found", "department": department_id}
 
     row = match.iloc[0]
     remaining = float(row["available_usd"]) - amount
     return {
         "department": str(row["department"]),
-        "amount": amount,
         "available_funds": float(row["available_usd"]),
         "remaining_funds": remaining,
         "within_budget": remaining >= 0,
-        "found": True,
     }
 
 
@@ -68,8 +60,15 @@ def search_software_catalog(need_description: str, category: str) -> list[dict]:
             lambda value: any(term in value for term in need_terms)
         )
     ).any(axis=1) if need_terms else False
-    matches = catalog[category_match | text_match]
-    return matches.to_dict(orient="records")
+    matches = catalog[category_match | text_match].head(3)
+    return [
+        {
+            "name": str(row["product_name"]),
+            "category": str(row["category"]),
+            "vendor": str(row["vendor_name"]),
+        }
+        for _, row in matches.iterrows()
+    ]
 
 
 def get_vendor_security_status(vendor_name: str) -> dict:
@@ -89,28 +88,36 @@ def get_vendor_security_status(vendor_name: str) -> dict:
         pass
 
     if registry.empty and risk_match.empty and api_risk is None:
-        return {"vendor_name": name, "found": False, "security_status": "unknown"}
+        return {"error": "Not found", "vendor_name": name}
 
-    result: dict = {"vendor_name": name, "found": True}
+    result: dict = {"vendor_name": name}
     if not registry.empty:
         row = registry.iloc[0]
         result.update(
             {
-                "vendor_id": str(row["vendor_id"]),
                 "security_status": str(row["security_status"]),
                 "security_review_date": None if pd.isna(row["security_review_date"]) else str(row["security_review_date"]),
-                "legal_terms_status": str(row["legal_terms_status"]),
             }
         )
     if api_risk is not None:
-        result.update(api_risk)
-        result["risk_service_available"] = True
+        result.update(
+            {
+                "risk_level": api_risk.get("risk_level", "unknown"),
+                "security_review_status": api_risk.get("security_review_status", "unknown"),
+                "last_review_date": api_risk.get("last_review_date"),
+                "risk_service_available": True,
+            }
+        )
     elif not risk_match.empty:
         row = risk_match.iloc[0]
-        for field in ("risk_level", "security_review_status", "last_review_date", "processes_personal_data", "stores_data_outside_region", "notes"):
-            if field in row.index and not pd.isna(row[field]):
-                result[field] = row[field].item() if hasattr(row[field], "item") else row[field]
-        result["risk_service_available"] = not bool(row.get("force_error", False))
+        result.update(
+            {
+                "risk_level": row.get("risk_level", "unknown"),
+                "security_review_status": row.get("security_review_status", "unknown"),
+                "last_review_date": row.get("last_review_date"),
+                "risk_service_available": not bool(row.get("force_error", False)),
+            }
+        )
     else:
         result["risk_service_available"] = False
     return result

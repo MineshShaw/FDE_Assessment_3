@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.agents import single_agent, two_agent
+from src.schemas import ProcurementOutput
 
 
 def _response(message: dict) -> SimpleNamespace:
@@ -42,6 +43,16 @@ def test_standard_assistant_message_is_appended_for_tool_loop() -> None:
 
     assert messages[0]["role"] == "assistant"
     assert messages[0]["tool_calls"][0]["function"]["name"] == "check_budget"
+
+
+def test_parser_accepts_json_code_fence() -> None:
+    from src.agents._common import parse_model
+
+    result = parse_model(
+        '```json\n{"recommendation":"REQUEST_INFO","next_step":"Ask for cost."}\n```',
+        ProcurementOutput,
+    )
+    assert result.recommendation == "REQUEST_INFO"
 
 
 def test_single_agent_executes_tool_then_parses_output(monkeypatch: pytest.MonkeyPatch) -> None:

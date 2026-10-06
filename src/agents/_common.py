@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -96,9 +97,7 @@ def parse_model(content: str | None, model_type: type[BaseModel]) -> BaseModel:
     if not content:
         raise ValueError("LLM response did not contain structured content")
     text = content.strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        text = "\n".join(line for line in lines[1:] if not line.strip().startswith("```")).strip()
+    text = re.sub(r"^```(?:json)?\s*(.*?)\s*```$", r"\1", text, flags=re.DOTALL | re.IGNORECASE).strip()
     try:
         payload = json.loads(text)
     except json.JSONDecodeError as exc:

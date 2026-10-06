@@ -31,8 +31,10 @@ def _run_analyst(request: str) -> StructuredEvidencePack:
         {
             "role": "system",
             "content": (
-                "You are the Analyst. Gather evidence with tools, then return only JSON matching "
-                "StructuredEvidencePack with budget_status, tool_overlap, and vendor_risk."
+                "You are the Analyst, an analytical agent. Call the provided tools to gather evidence. "
+                "Once you have sufficient evidence, DO NOT call any more tools. You must output a raw "
+                "JSON object matching StructuredEvidencePack with budget_status, tool_overlap, and vendor_risk. "
+                "Do not include markdown formatting, code blocks, or explanatory text outside the JSON."
             ),
         },
         {"role": "user", "content": request},
@@ -68,8 +70,10 @@ def run_two_agent(request: str) -> ProcurementOutput:
         raise RuntimeError("OPENAI_API_KEY is required to run the two-agent architecture")
     evidence_pack = _run_analyst(request)
     reviewer_prompt = (
-        "You are the Reviewer. Review the request and evidence pack. Apply the deterministic policy "
-        "result supplied below, then return only JSON matching ProcurementOutput.\n\n"
+        "You are the Reviewer, an analytical agent. Review the request and evidence pack. Apply the "
+        "deterministic policy result supplied below. Once you have sufficient evidence, DO NOT call "
+        "any more tools. Output a raw JSON object matching the ProcurementOutput schema. Do not include "
+        "markdown formatting, code blocks, or explanatory text outside the JSON.\n\n"
         f"Request:\n{request}\n\nEvidence pack:\n{evidence_pack.model_dump_json()}\n\n"
         "Apply policy using the request's amount, vendor risk, and data classification."
     )
