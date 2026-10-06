@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pydantic import ValidationError
+
 from src.agents._common import (
     TOOL_SCHEMAS,
     append_assistant_message,
@@ -13,6 +15,7 @@ from src.schemas import ProcurementOutput
 
 
 MAX_ITERATIONS = 10
+MAX_VALIDATION_RETRIES = 2
 
 
 def run_single_agent(request: str) -> ProcurementOutput:
@@ -62,6 +65,8 @@ def run_single_agent(request: str) -> ProcurementOutput:
             request_kwargs.update({"tools": TOOL_SCHEMAS, "tool_choice": "auto"})
         else:
             request_kwargs["tool_choice"] = "none"
+        if bailout or any(message.get("role") == "tool" for message in messages):
+            request_kwargs["response_format"] = {"type": "json_object"}
         response = client.chat.completions.create(**request_kwargs)
         message = message_from_response(response)
         tool_calls = value(message, "tool_calls", None)
@@ -76,6 +81,32 @@ def run_single_agent(request: str) -> ProcurementOutput:
                     }
                 )
             continue
-        return parse_model(value(message, "content"), ProcurementOutput)
+        validation_error: Exception | None = None
+        for attempt in range(MAX_VALIDATION_RETRIES + 1):
+            try:
+                return parse_model(value(message, "content"), ProcurementOutput)
+            except (ValidationError, ValueError) as exc:
+                validation_error = exc
+                if attempt == MAX_VALIDATION_RETRIES:
+                    raise
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your last response failed validation. Fix these exact JSON errors and "
+                            f"return the corrected JSON object: {exc}"
+                        ),
+                    }
+                )
+                retry_response = client.chat.completions.create(
+                    model=MODEL_NAME,
+                    messages=messages,
+                    tool_choice="none",
+                    response_format={"type": "json_object"},
+                )
+                retry_message = message_from_response(retry_response)
+                append_assistant_message(messages, retry_message)
+                message = retry_message
+        raise RuntimeError(f"Final output validation failed: {validation_error}")
 
     raise RuntimeError(f"Single-agent orchestration exceeded {MAX_ITERATIONS} iterations")

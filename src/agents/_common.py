@@ -97,7 +97,11 @@ def parse_model(content: str | None, model_type: type[BaseModel]) -> BaseModel:
     if not content:
         raise ValueError("LLM response did not contain structured content")
     text = content.strip()
-    text = re.sub(r"^```(?:json)?\s*(.*?)\s*```$", r"\1", text, flags=re.DOTALL | re.IGNORECASE).strip()
+    match = re.search(r"(\{.*\})", text, flags=re.DOTALL)
+    if match:
+        text = match.group(1)
+    else:
+        text = re.sub(r"^```(?:json)?\s*(.*?)\s*```$", r"\1", text, flags=re.DOTALL | re.IGNORECASE).strip()
     try:
         payload = json.loads(text)
     except json.JSONDecodeError as exc:

@@ -6,12 +6,14 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class ProcurementOutput(BaseModel):
-    recommendation: Literal["APPROVE", "REJECT", "ESCALATE_TO_HUMAN", "REQUEST_INFO"] = "ESCALATE_TO_HUMAN"
+    recommendation: Literal["APPROVE", "REJECT", "ESCALATE_TO_HUMAN", "REQUEST_INFO"] = Field(
+        default="ESCALATE_TO_HUMAN"
+    )
     evidence: list[str] = Field(default_factory=list)
     approvals_required: list[str] = Field(default_factory=list)
     missing_information: list[str] = Field(default_factory=list)
     risk_flags: list[str] = Field(default_factory=list)
-    next_step: str = "Pending manual review"
+    next_step: str = Field(default="Manual review required.")
 
 
 class StructuredEvidencePack(BaseModel):

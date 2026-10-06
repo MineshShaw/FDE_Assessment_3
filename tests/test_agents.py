@@ -56,8 +56,18 @@ def test_parser_accepts_json_code_fence() -> None:
     assert result.recommendation == "REQUEST_INFO"
 
 
+def test_parser_extracts_json_from_chatty_text() -> None:
+    from src.agents._common import parse_model
+
+    result = parse_model(
+        'Here is the decision: {"recommendation":"REJECT","next_step":"Stop purchase."} Thanks.',
+        ProcurementOutput,
+    )
+    assert result.recommendation == "REJECT"
+
+
 def test_schemas_supply_defaults_and_coerce_single_overlap() -> None:
-    assert ProcurementOutput(recommendation="APPROVE").next_step == "Pending manual review"
+    assert ProcurementOutput(recommendation="APPROVE").next_step == "Manual review required."
     pack = StructuredEvidencePack(tool_overlap={"name": "TaskFlow"})
     assert pack.tool_overlap == [{"name": "TaskFlow"}]
 
@@ -93,6 +103,33 @@ def test_single_agent_executes_tool_then_parses_output(monkeypatch: pytest.Monke
     assert result.recommendation == "APPROVE"
     assert len(calls) == 2
     assert calls[1]["messages"][-1]["role"] == "tool"
+    assert calls[1]["response_format"] == {"type": "json_object"}
+
+
+def test_single_agent_retries_invalid_final_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = iter(
+        [
+            _response({"content": '{"recommendation":"NOT_VALID"}', "tool_calls": None}),
+            _response({"content": '{"recommendation":"REQUEST_INFO"}', "tool_calls": None}),
+        ]
+    )
+    calls = []
+
+    def create(**kwargs):
+        calls.append(deepcopy(kwargs))
+        return next(responses)
+
+    monkeypatch.setattr(
+        single_agent,
+        "client",
+        SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
+    )
+    result = single_agent.run_single_agent("Need a procurement decision.")
+
+    assert result.recommendation == "REQUEST_INFO"
+    assert len(calls) == 2
+    assert calls[1]["response_format"] == {"type": "json_object"}
+    assert "failed validation" in calls[1]["messages"][-1]["content"]
 
 
 def test_single_agent_has_a_hard_iteration_cap(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -192,3 +229,4 @@ def test_two_agent_analyst_loop_and_reviewer_parse(monkeypatch: pytest.MonkeyPat
     assert "Original Request:" in calls[-1]["messages"][1]["content"]
     assert "Evidence Pack from Analyst:" in calls[-1]["messages"][1]["content"]
     assert "Deterministic policy result" in calls[-1]["messages"][1]["content"]
+    assert calls[-1]["response_format"] == {"type": "json_object"}

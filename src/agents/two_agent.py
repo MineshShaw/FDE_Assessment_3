@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+from pydantic import ValidationError
+
 from src.agents._common import (
     TOOL_SCHEMAS,
     append_assistant_message,
@@ -16,6 +18,7 @@ from src.tools import evaluate_policy_rules
 
 
 MAX_ITERATIONS = 10
+MAX_VALIDATION_RETRIES = 2
 
 
 def _run_analyst(request: str) -> StructuredEvidencePack:
@@ -110,14 +113,41 @@ def run_two_agent(request: str) -> ProcurementOutput:
         f"Deterministic policy result:\n{json.dumps(policy_result)}\n\n"
         "Apply policy using the request's amount, vendor risk, and data classification."
     )
+    reviewer_messages = [
+        {"role": "system", "content": reviewer_system_prompt},
+        {"role": "user", "content": reviewer_user_prompt},
+    ]
     response = client.chat.completions.create(
         model=MODEL_NAME,
-        messages=[
-            {"role": "system", "content": reviewer_system_prompt},
-            {"role": "user", "content": reviewer_user_prompt},
-        ],
+        messages=reviewer_messages,
+        response_format={"type": "json_object"},
     )
-    return parse_model(value(message_from_response(response), "content"), ProcurementOutput)
+    message = message_from_response(response)
+    validation_error: Exception | None = None
+    for attempt in range(MAX_VALIDATION_RETRIES + 1):
+        try:
+            return parse_model(value(message, "content"), ProcurementOutput)
+        except (ValidationError, ValueError) as exc:
+            validation_error = exc
+            if attempt == MAX_VALIDATION_RETRIES:
+                raise
+            reviewer_messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Your last response failed validation. Fix these exact JSON errors and "
+                        f"return the corrected JSON object: {exc}"
+                    ),
+                }
+            )
+            retry_response = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=reviewer_messages,
+                tool_choice="none",
+                response_format={"type": "json_object"},
+            )
+            message = message_from_response(retry_response)
+    raise RuntimeError(f"Reviewer output validation failed: {validation_error}")
 
 
 def _number_from_pack(pack: StructuredEvidencePack, key: str) -> float:
