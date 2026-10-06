@@ -24,7 +24,7 @@ def test_catalog_search_matches_category_and_need() -> None:
     results = search_software_catalog("campaign task tracker", "Project Management")
     assert len(results) <= 3
     assert any(row["name"] == "TaskFlow" for row in results)
-    assert set(results[0]) == {"name", "category", "vendor"}
+    assert set(results[0]) == {"name", "category"}
 
 
 def test_vendor_security_status_uses_mock_service_and_handles_unknown_vendors(monkeypatch: pytest.MonkeyPatch) -> None:

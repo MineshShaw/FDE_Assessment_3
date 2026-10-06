@@ -65,7 +65,6 @@ def search_software_catalog(need_description: str, category: str) -> list[dict]:
         {
             "name": str(row["product_name"]),
             "category": str(row["category"]),
-            "vendor": str(row["vendor_name"]),
         }
         for _, row in matches.iterrows()
     ]

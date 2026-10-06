@@ -8,6 +8,7 @@ import pytest
 
 from src.agents import single_agent, two_agent
 from src.schemas import ProcurementOutput
+from src.schemas import StructuredEvidencePack
 
 
 def _response(message: dict) -> SimpleNamespace:
@@ -53,6 +54,12 @@ def test_parser_accepts_json_code_fence() -> None:
         ProcurementOutput,
     )
     assert result.recommendation == "REQUEST_INFO"
+
+
+def test_schemas_supply_defaults_and_coerce_single_overlap() -> None:
+    assert ProcurementOutput(recommendation="APPROVE").next_step == "Pending manual review"
+    pack = StructuredEvidencePack(tool_overlap={"name": "TaskFlow"})
+    assert pack.tool_overlap == [{"name": "TaskFlow"}]
 
 
 def test_single_agent_executes_tool_then_parses_output(monkeypatch: pytest.MonkeyPatch) -> None:

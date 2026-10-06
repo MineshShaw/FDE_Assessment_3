@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 
-from pydantic import BaseModel, Field
-
 from src.agents._common import (
     TOOL_SCHEMAS,
     append_assistant_message,
@@ -13,17 +11,11 @@ from src.agents._common import (
     value,
 )
 from src.llm_client import MODEL_NAME, client
-from src.schemas import ProcurementOutput
+from src.schemas import ProcurementOutput, StructuredEvidencePack
 from src.tools import evaluate_policy_rules
 
 
 MAX_ITERATIONS = 5
-
-
-class StructuredEvidencePack(BaseModel):
-    budget_status: dict = Field(default_factory=dict)
-    tool_overlap: list[dict] = Field(default_factory=list)
-    vendor_risk: dict = Field(default_factory=dict)
 
 
 def _run_analyst(request: str) -> StructuredEvidencePack:
@@ -34,7 +26,11 @@ def _run_analyst(request: str) -> StructuredEvidencePack:
                 "You are the Analyst, an analytical agent. Call the provided tools to gather evidence. "
                 "Once you have sufficient evidence, DO NOT call any more tools. You must output a raw "
                 "JSON object matching StructuredEvidencePack with budget_status, tool_overlap, and vendor_risk. "
-                "Do not include markdown formatting, code blocks, or explanatory text outside the JSON."
+                "Do not include markdown formatting, code blocks, or explanatory text outside the JSON. "
+                "You MUST output a valid JSON object matching this exact schema. Do NOT output tool "
+                "variables like 'approved' or 'amount'. Map your final decision strictly to the "
+                "'recommendation' key (choose from: APPROVE, REJECT, ESCALATE_TO_HUMAN, REQUEST_INFO).\n"
+                '{"budget_status": {}, "tool_overlap": [], "vendor_risk": {}}'
             ),
         },
         {"role": "user", "content": request},
@@ -73,7 +69,13 @@ def run_two_agent(request: str) -> ProcurementOutput:
         "You are the Reviewer, an analytical agent. Review the request and evidence pack. Apply the "
         "deterministic policy result supplied below. Once you have sufficient evidence, DO NOT call "
         "any more tools. Output a raw JSON object matching the ProcurementOutput schema. Do not include "
-        "markdown formatting, code blocks, or explanatory text outside the JSON.\n\n"
+        "markdown formatting, code blocks, or explanatory text outside the JSON. "
+        "You MUST output a valid JSON object matching this exact schema. Do NOT output tool variables "
+        "like 'approved' or 'amount'. Map your final decision strictly to the 'recommendation' key "
+        "(choose from: APPROVE, REJECT, ESCALATE_TO_HUMAN, REQUEST_INFO).\n"
+        '{"recommendation": "APPROVE | REJECT | ESCALATE_TO_HUMAN | REQUEST_INFO", '
+        '"evidence": ["..."], "approvals_required": ["..."], "missing_information": [], '
+        '"risk_flags": [], "next_step": "..."}\n\n'
         f"Request:\n{request}\n\nEvidence pack:\n{evidence_pack.model_dump_json()}\n\n"
         "Apply policy using the request's amount, vendor risk, and data classification."
     )

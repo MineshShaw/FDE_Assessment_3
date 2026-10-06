@@ -25,7 +25,13 @@ def run_single_agent(request: str) -> ProcurementOutput:
                 "You are an analytical agent. Call the provided tools to gather evidence. "
                 "Once you have sufficient evidence, DO NOT call any more tools. You must output "
                 "your final decision as a raw JSON object matching the ProcurementOutput schema. "
-                "Do not include markdown formatting, code blocks, or explanatory text outside the JSON."
+                "Do not include markdown formatting, code blocks, or explanatory text outside the JSON. "
+                "You MUST output a valid JSON object matching this exact schema. Do NOT output tool "
+                "variables like 'approved' or 'amount'. Map your final decision strictly to the "
+                "'recommendation' key (choose from: APPROVE, REJECT, ESCALATE_TO_HUMAN, REQUEST_INFO).\n"
+                '{"recommendation": "APPROVE | REJECT | ESCALATE_TO_HUMAN | REQUEST_INFO", '
+                '"evidence": ["..."], "approvals_required": ["..."], "missing_information": [], '
+                '"risk_flags": [], "next_step": "..."}'
             ),
         },
         {"role": "user", "content": request},
