@@ -1,6 +1,6 @@
 # Architecture Decision Memo
 
-**Decision:** Ship the staged two-agent architecture as the production direction, with the single-agent flow retained as a simpler fallback.
+**Which architecture would I ship—and why?** Ship the staged two-agent architecture as the production direction, with the single-agent flow retained as a simpler fallback.
 
 **Evidence:** The initial benchmark in `evaluation/benchmark_results.json` ran 10 edge cases through each architecture in offline-stub mode. Both achieved 10/10 golden-label matches. The single-agent flow averaged 2 LLM calls and 1 tool execution per case; the staged flow averaged 3 LLM calls and 1 tool execution. Despite the extra reviewer call, staged latency averaged 13.80 ms versus 14.16 ms for single in this local run. These timings measure orchestration overhead, not remote model latency, so production measurements should be repeated with the configured provider.
 
