@@ -188,4 +188,7 @@ def test_two_agent_analyst_loop_and_reviewer_parse(monkeypatch: pytest.MonkeyPat
 
     assert result.recommendation == "ESCALATE_TO_HUMAN"
     assert len(calls) == 3
-    assert "Deterministic policy result" in calls[-1]["messages"][0]["content"]
+    assert [message["role"] for message in calls[-1]["messages"]] == ["system", "user"]
+    assert "Original Request:" in calls[-1]["messages"][1]["content"]
+    assert "Evidence Pack from Analyst:" in calls[-1]["messages"][1]["content"]
+    assert "Deterministic policy result" in calls[-1]["messages"][1]["content"]

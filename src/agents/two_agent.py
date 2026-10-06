@@ -84,19 +84,17 @@ def run_two_agent(request: str) -> ProcurementOutput:
     if client is None:
         raise RuntimeError("OPENAI_API_KEY is required to run the two-agent architecture")
     evidence_pack = _run_analyst(request)
-    reviewer_prompt = (
-        "You are the Reviewer, an analytical agent. Review the request and evidence pack. Apply the "
-        "deterministic policy result supplied below. Once you have sufficient evidence, DO NOT call "
-        "any more tools. Output a raw JSON object matching the ProcurementOutput schema. Do not include "
-        "markdown formatting, code blocks, or explanatory text outside the JSON. "
+    reviewer_system_prompt = (
+        "You are the Policy Risk Reviewer, an analytical agent. Review the request and evidence pack. "
+        "Apply the deterministic policy result supplied in the user message. Once you have sufficient "
+        "evidence, DO NOT call any more tools. Output a raw JSON object matching the ProcurementOutput "
+        "schema. Do not include markdown formatting, code blocks, or explanatory text outside the JSON. "
         "You MUST output a valid JSON object matching this exact schema. Do NOT output tool variables "
         "like 'approved' or 'amount'. Map your final decision strictly to the 'recommendation' key "
         "(choose from: APPROVE, REJECT, ESCALATE_TO_HUMAN, REQUEST_INFO).\n"
         '{"recommendation": "APPROVE | REJECT | ESCALATE_TO_HUMAN | REQUEST_INFO", '
         '"evidence": ["..."], "approvals_required": ["..."], "missing_information": [], '
-        '"risk_flags": [], "next_step": "..."}\n\n'
-        f"Request:\n{request}\n\nEvidence pack:\n{evidence_pack.model_dump_json()}\n\n"
-        "Apply policy using the request's amount, vendor risk, and data classification."
+        '"risk_flags": [], "next_step": "..."}'
     )
 
     # The reviewer applies this deterministic check before asking the LLM to phrase the final result.
@@ -105,10 +103,19 @@ def run_two_agent(request: str) -> ProcurementOutput:
         vendor_risk=str(evidence_pack.vendor_risk.get("risk_level", "unknown")),
         data_classification=_classification_from_request(request),
     )
-    reviewer_prompt += f"\n\nDeterministic policy result:\n{json.dumps(policy_result)}"
+    evidence_pack_json = json.dumps(evidence_pack.model_dump())
+    reviewer_user_prompt = (
+        f"Original Request:\n{request}\n\n"
+        f"Evidence Pack from Analyst:\n{evidence_pack_json}\n\n"
+        f"Deterministic policy result:\n{json.dumps(policy_result)}\n\n"
+        "Apply policy using the request's amount, vendor risk, and data classification."
+    )
     response = client.chat.completions.create(
         model=MODEL_NAME,
-        messages=[{"role": "system", "content": reviewer_prompt}],
+        messages=[
+            {"role": "system", "content": reviewer_system_prompt},
+            {"role": "user", "content": reviewer_user_prompt},
+        ],
     )
     return parse_model(value(message_from_response(response), "content"), ProcurementOutput)
 
