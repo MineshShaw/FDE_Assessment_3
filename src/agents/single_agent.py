@@ -10,7 +10,7 @@ from src.agents._common import (
     parse_model,
     value,
 )
-from src.llm_client import MODEL_NAME, client
+from src.llm_client import MODEL_NAME, client, sanitize_messages
 from src.schemas import ProcurementOutput
 
 
@@ -67,6 +67,7 @@ def run_single_agent(request: str) -> ProcurementOutput:
             request_kwargs["tool_choice"] = "none"
         if bailout or any(message.get("role") == "tool" for message in messages):
             request_kwargs["response_format"] = {"type": "json_object"}
+        request_kwargs["messages"] = sanitize_messages(messages)
         response = client.chat.completions.create(**request_kwargs)
         message = message_from_response(response)
         tool_calls = value(message, "tool_calls", None)
@@ -98,12 +99,13 @@ def run_single_agent(request: str) -> ProcurementOutput:
                         ),
                     }
                 )
-                retry_response = client.chat.completions.create(
-                    model=MODEL_NAME,
-                    messages=messages,
-                    tool_choice="none",
-                    response_format={"type": "json_object"},
-                )
+                retry_kwargs = {
+                    "model": MODEL_NAME,
+                    "messages": sanitize_messages(messages),
+                    "tool_choice": "none",
+                    "response_format": {"type": "json_object"},
+                }
+                retry_response = client.chat.completions.create(**retry_kwargs)
                 retry_message = message_from_response(retry_response)
                 append_assistant_message(messages, retry_message)
                 message = retry_message

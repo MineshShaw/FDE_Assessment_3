@@ -12,7 +12,7 @@ from src.agents._common import (
     parse_model,
     value,
 )
-from src.llm_client import MODEL_NAME, client
+from src.llm_client import MODEL_NAME, client, sanitize_messages
 from src.schemas import ProcurementOutput, StructuredEvidencePack
 from src.tools import evaluate_policy_rules
 
@@ -65,6 +65,9 @@ def _run_analyst(request: str) -> StructuredEvidencePack:
             request_kwargs.update({"tools": TOOL_SCHEMAS[:3], "tool_choice": "auto"})
         else:
             request_kwargs["tool_choice"] = "none"
+        if bailout or any(message.get("role") == "tool" for message in messages):
+            request_kwargs["response_format"] = {"type": "json_object"}
+        request_kwargs["messages"] = sanitize_messages(messages)
         response = client.chat.completions.create(**request_kwargs)
         message = message_from_response(response)
         tool_calls = value(message, "tool_calls", None)
@@ -119,7 +122,7 @@ def run_two_agent(request: str) -> ProcurementOutput:
     ]
     response = client.chat.completions.create(
         model=MODEL_NAME,
-        messages=reviewer_messages,
+        messages=sanitize_messages(reviewer_messages),
         response_format={"type": "json_object"},
     )
     message = message_from_response(response)
@@ -142,12 +145,12 @@ def run_two_agent(request: str) -> ProcurementOutput:
             )
             retry_response = client.chat.completions.create(
                 model=MODEL_NAME,
-                messages=reviewer_messages,
+                messages=sanitize_messages(reviewer_messages),
                 tool_choice="none",
                 response_format={"type": "json_object"},
             )
             message = message_from_response(retry_response)
-    raise RuntimeError(f"Reviewer output validation failed: {validation_error}")
+    return ProcurementOutput(recommendation="ESCALATE_TO_HUMAN")
 
 
 def _number_from_pack(pack: StructuredEvidencePack, key: str) -> float:

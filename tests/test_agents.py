@@ -66,6 +66,35 @@ def test_parser_extracts_json_from_chatty_text() -> None:
     assert result.recommendation == "REJECT"
 
 
+def test_provider_neutral_message_sanitizer_strips_extras_and_adds_user() -> None:
+    from src.llm_client import sanitize_messages
+
+    result = sanitize_messages(
+        [
+            {"role": "system", "content": "Rules", "model_extra": {"trace": "secret"}},
+            {
+                "role": "tool",
+                "content": '{"ok": true}',
+                "tool_call_id": "call-1",
+                "hidden": "removed",
+            },
+        ]
+    )
+
+    assert result[-1] == {
+        "role": "user",
+        "content": "Continue execution based on the tool results.",
+    }
+    assert "model_extra" not in result[0]
+    assert "hidden" not in result[1]
+
+
+def test_json_extractor_returns_structured_error() -> None:
+    from src.llm_client import extract_json_from_chatty_response
+
+    assert extract_json_from_chatty_response("not json")["error"]
+
+
 def test_schemas_supply_defaults_and_coerce_single_overlap() -> None:
     assert ProcurementOutput(recommendation="APPROVE").next_step == "Manual review required."
     pack = StructuredEvidencePack(tool_overlap={"name": "TaskFlow"})

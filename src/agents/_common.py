@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from src.llm_client import extract_json_from_chatty_response
 from src.tools import (
     check_budget,
     evaluate_policy_rules,
@@ -96,16 +97,7 @@ def message_from_response(response: Any) -> Any:
 def parse_model(content: str | None, model_type: type[BaseModel]) -> BaseModel:
     if not content:
         raise ValueError("LLM response did not contain structured content")
-    text = content.strip()
-    match = re.search(r"(\{.*\})", text, flags=re.DOTALL)
-    if match:
-        text = match.group(1)
-    else:
-        text = re.sub(r"^```(?:json)?\s*(.*?)\s*```$", r"\1", text, flags=re.DOTALL | re.IGNORECASE).strip()
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise ValueError("LLM response was not valid JSON") from exc
+    payload = extract_json_from_chatty_response(content)
     return model_type.model_validate(payload)
 
 
