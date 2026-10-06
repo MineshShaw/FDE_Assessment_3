@@ -109,7 +109,7 @@ def _run_case(case: dict[str, Any], architecture: str) -> dict[str, Any]:
     staged = architecture == "staged"
     module = two_agent if staged else single_agent
     original_client = module.client
-    offline = not os.getenv("OPENAI_API_KEY")
+    offline = not (os.getenv("OPENAI_API_KEY") or os.getenv("GROQ_API_KEY"))
     if offline:
         module.client = OfflineClient(case, staged)
     start = time.perf_counter()
