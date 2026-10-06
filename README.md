@@ -98,5 +98,3 @@ All data is synthetic and small enough to load into memory. The committed benchm
 ## Final ship decision
 
 Ship the **Staged Two-Agent** architecture: the Analyst separates evidence collection from the Reviewer’s deterministic policy decision, improving auditability for sensitive procurement cases. Keep Single Agent as the lower-cost fallback for simpler requests. Both passed 10/10 benchmark cases; staged used one additional LLM call per case in the initial comparison.
-
-The copilot recommends actions only; it does not purchase software, approve spend, alter budgets, or accept legal terms.
