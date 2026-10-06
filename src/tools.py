@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from numbers import Real
 
 import pandas as pd
@@ -7,6 +8,9 @@ import requests
 
 from src.data_loader import load_all_data
 from src.vendor_client import get_vendor_risk
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _data() -> dict[str, pd.DataFrame]:
@@ -87,8 +91,8 @@ def get_vendor_security_status(vendor_name: str) -> dict:
         api_risk: dict | None = None
         try:
             api_risk = get_vendor_risk(name, timeout_seconds=0.5)
-        except requests.RequestException:
-            pass
+        except requests.RequestException as exc:
+            LOGGER.warning("Vendor risk API unavailable for %s, using local snapshot fallback: %s", name, exc)
 
         if registry.empty and risk_match.empty and api_risk is None:
             return {"status": "not found", "vendor_name": name}

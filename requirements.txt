@@ -4,3 +4,5 @@ streamlit
 pandas
 pytest
 python-dotenv
+fastapi
+uvicorn

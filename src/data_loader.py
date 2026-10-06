@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
@@ -21,6 +22,7 @@ def _load_json_records(path: Path) -> pd.DataFrame:
     raise ValueError(f"Unsupported JSON structure in {path.name}")
 
 
+@lru_cache(maxsize=1)
 def load_all_data() -> dict[str, pd.DataFrame]:
     """Load the complete synthetic data snapshot into Pandas DataFrames."""
     policy_path = DATA_DIR / "procurement_policy.md"
