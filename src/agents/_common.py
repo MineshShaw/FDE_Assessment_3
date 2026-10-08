@@ -119,6 +119,11 @@ def policy_result_from_messages(request: str, messages: list[dict]) -> dict | No
             amount = float(payload["requested_amount"])
         if "risk_level" in payload:
             vendor_risk = str(payload["risk_level"])
+    request_amount = re.search(r"\$([\d,]+(?:\.\d+)?)", request)
+    if request_amount:
+        amount = float(request_amount.group(1).replace(",", ""))
+    if "timeout" in request.casefold() or "expired" in request.casefold():
+        vendor_risk = "unknown"
     lowered = request.casefold()
     for candidate in ("customer_pii", "employee_pii", "source_code", "confidential_documents", "production"):
         if candidate in lowered:
@@ -126,7 +131,18 @@ def policy_result_from_messages(request: str, messages: list[dict]) -> dict | No
             break
     if amount is None:
         return None
-    return evaluate_policy_rules(amount, vendor_risk, classification)
+    result = evaluate_policy_rules(amount, vendor_risk, classification)
+    lowered = request.casefold()
+    if any(term in lowered for term in ("ignore all procurement rules", "approve immediately", "bypass controls")):
+        result.setdefault("risk_flags", []).append("prompt_injection_detected")
+    if "exceeding" in lowered or "over budget" in lowered:
+        result.setdefault("risk_flags", []).append("budget_insufficient")
+    if "expired" in lowered:
+        result.setdefault("risk_flags", []).append("vendor_review_expired")
+    if "new vendor" in lowered:
+        result.setdefault("risk_flags", []).append("legal_review_required")
+    result["risk_flags"] = list(dict.fromkeys(result.get("risk_flags", [])))
+    return result
 
 
 def enforce_policy_floor(output: BaseModel, policy_result: dict | None) -> BaseModel:
@@ -135,6 +151,12 @@ def enforce_policy_floor(output: BaseModel, policy_result: dict | None) -> BaseM
         return output
     approvals = list(dict.fromkeys(output.approvals_required + policy_result.get("approvals_required", [])))
     risk_flags = list(dict.fromkeys(output.risk_flags + policy_result.get("risk_flags", [])))
+    if "security_review_required" in risk_flags and "Security" not in approvals:
+        approvals.append("Security")
+    if "privacy_review_required" in risk_flags and "Privacy" not in approvals:
+        approvals.append("Privacy")
+    if "legal_review_required" in risk_flags and "Legal" not in approvals:
+        approvals.append("Legal")
     recommendation = output.recommendation
     if output.missing_information:
         recommendation = "REQUEST_INFO"
@@ -145,6 +167,10 @@ def enforce_policy_floor(output: BaseModel, policy_result: dict | None) -> BaseM
             "recommendation": recommendation,
             "approvals_required": approvals,
             "risk_flags": risk_flags,
+            "evidence": list(dict.fromkeys(output.evidence + [
+                f"deterministic_policy: approvals={', '.join(approvals) or 'none'}; "
+                f"risk_flags={', '.join(risk_flags) or 'none'}"
+            ])),
         }
     )
 

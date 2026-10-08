@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from numbers import Real
 
 import pandas as pd
@@ -11,6 +12,7 @@ from src.vendor_client import get_vendor_risk
 
 
 LOGGER = logging.getLogger(__name__)
+REFERENCE_DATE = date(2026, 9, 30)
 
 
 def _data() -> dict[str, pd.DataFrame]:
@@ -56,24 +58,31 @@ def search_software_catalog(need_description: str, category: str) -> list[dict] 
             raise ValueError("need_description and category must be strings")
         catalog = _data()["software_catalog"]
         category_query = category.strip().casefold()
-        need_terms = [term for term in need_description.casefold().split() if len(term) > 2]
-        category_match = (
-            catalog["category"].astype(str).str.casefold().eq(category_query)
-            if category_query
-            else False
-        )
-        searchable = catalog[["product_name", "category", "vendor_name", "status", "notes"]].fillna("").astype(str)
-        text_match = (
-            searchable.apply(
-                lambda column: column.str.casefold().apply(
-                    lambda value: any(term in value for term in need_terms)
+        need_terms = {term for term in need_description.casefold().split() if len(term) > 2}
+        rows: list[tuple[int, dict]] = []
+        for _, row in catalog.fillna("").iterrows():
+            row_category = str(row["category"]).casefold()
+            row_text = " ".join(
+                str(row[column]).casefold()
+                for column in ("product_name", "category", "vendor_name", "notes")
+            )
+            category_score = 100 if category_query and row_category == category_query else 0
+            term_score = sum(1 for term in need_terms if term in row_text)
+            if category_score or term_score:
+                rows.append(
+                    (
+                        category_score + term_score,
+                        {
+                            "name": str(row["product_name"]),
+                            "desc": str(row["notes"]),
+                            "category": str(row["category"]),
+                            "status": str(row["status"]),
+                            "vendor": str(row["vendor_name"]),
+                        },
+                    )
                 )
-            ).any(axis=1)
-            if need_terms
-            else False
-        )
-        matches = catalog[category_match | text_match].head(2)
-        return [{"name": str(row["product_name"]), "desc": str(row["notes"])} for _, row in matches.iterrows()]
+        rows.sort(key=lambda item: item[0], reverse=True)
+        return [item[1] for item in rows[:2]]
     except Exception as exc:
         return {"error": f"catalog search failed: {exc}"}
 
@@ -130,6 +139,22 @@ def get_vendor_security_status(vendor_name: str) -> dict:
             )
         else:
             result["risk_service_available"] = False
+        review_date = result.get("last_review_date") or result.get("security_review_date")
+        try:
+            result["review_expired"] = (
+                not review_date
+                or (REFERENCE_DATE - date.fromisoformat(str(review_date))).days > 365
+            )
+        except ValueError:
+            result["review_expired"] = True
+        result["security_review_status"] = str(result.get("security_review_status", "unknown"))
+        result["risk_level"] = str(result.get("risk_level", "unknown"))
+        result["registry_api_conflict"] = bool(
+            result.get("security_status")
+            and result.get("security_review_status")
+            and str(result["security_status"]).casefold()
+            != result["security_review_status"].casefold()
+        )
         return result
     except Exception as exc:
         return {"error": f"vendor security lookup failed: {exc}"}

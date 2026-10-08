@@ -166,15 +166,17 @@ def _run_case(case: dict[str, Any], architecture: str) -> dict[str, Any]:
         llm_calls = module.client.calls
         evidence_text = " ".join(parsed.evidence).casefold()
         tool_text = " ".join(counter["tool_results"]).casefold()
-        evidence_grounded = bool(parsed.evidence) and (
-            "tool result" in evidence_text
-            or any(term in evidence_text for term in tool_text.split() if len(term) > 4)
+        evidence_grounded = bool(parsed.evidence) and any(
+            source in evidence_text for source in ("tool result:", "deterministic_policy:")
+        ) and bool(tool_text)
+        expected_policy = _common.TOOL_FUNCTIONS["evaluate_policy_rules"](
+            _request_amount(case["request"]),
+            "unknown" if any(word in case["request"].casefold() for word in ("timeout", "expired")) else "low",
+            _request_classification(case["request"]),
         )
-        policy_rules_followed = bool(parsed.approvals_required) or bool(parsed.missing_information)
-        human_review_correct = parsed.recommendation in {
-            "ESCALATE_TO_HUMAN",
-            "REQUEST_INFO",
-        }
+        policy_rules_followed = set(expected_policy.get("approvals_required", [])) <= set(parsed.approvals_required)
+        policy_rules_followed = policy_rules_followed and set(expected_policy.get("risk_flags", [])) <= set(parsed.risk_flags)
+        human_review_correct = parsed.recommendation == case["expected_recommendation"]
         next_action_present = bool(parsed.next_step.strip())
         passed = (
             parsed.recommendation == case["expected_recommendation"]

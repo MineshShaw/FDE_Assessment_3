@@ -59,6 +59,16 @@ request = st.text_area(
     height=140,
     placeholder="Describe the product, vendor, department, cost, users, and data access.",
 )
+with st.expander("Request details", expanded=True):
+    detail_cols = st.columns(4)
+    with detail_cols[0]:
+        requester = st.text_input("Requester", placeholder="Employee name or ID")
+    with detail_cols[1]:
+        department = st.text_input("Department", placeholder="Marketing")
+    with detail_cols[2]:
+        budget = st.text_input("Annual budget / cost", placeholder="$5,000")
+    with detail_cols[3]:
+        vendor = st.text_input("Vendor / product", placeholder="Vendor or product name")
 architecture = st.sidebar.radio("Architecture", ["Single Agent", "Staged Two-Agent"])
 
 if st.sidebar.button("Clear result"):
@@ -82,7 +92,13 @@ else:
 
     st.divider()
     st.subheader("Recommendation")
-    st.success(result.recommendation)
+    recommendation_colors = {
+        "APPROVE": "success",
+        "REJECT": "error",
+        "ESCALATE_TO_HUMAN": "warning",
+        "REQUEST_INFO": "info",
+    }
+    getattr(st, recommendation_colors[result.recommendation])(result.recommendation)
     st.write(result.next_step)
 
     left, right = st.columns(2)
@@ -93,7 +109,14 @@ else:
         render_list("Risk flags", result.risk_flags)
         st.subheader("Evidence")
         if result.evidence:
-            st.dataframe(pd.DataFrame({"Evidence": result.evidence}), hide_index=True, use_container_width=True)
+            evidence_rows = [
+                {
+                    "Source": item.split(":", 1)[0] if ":" in item else "agent",
+                    "Finding": item.split(":", 1)[1].strip() if ":" in item else item,
+                }
+                for item in result.evidence
+            ]
+            st.dataframe(pd.DataFrame(evidence_rows), hide_index=True, use_container_width=True)
         else:
             st.caption("No evidence returned.")
 
@@ -105,14 +128,16 @@ else:
     st.caption("These controls record a reviewer decision in this session; they do not purchase or approve spend.")
     approve, reject, override = st.columns(3)
     with approve:
-        if st.button("Approve", use_container_width=True):
+        approve_disabled = result.recommendation == "REQUEST_INFO"
+        if st.button("Approve", disabled=approve_disabled, use_container_width=True):
             st.session_state["review_action"] = "Approved by human reviewer"
     with reject:
         if st.button("Reject", use_container_width=True):
             st.session_state["review_action"] = "Rejected by human reviewer"
     with override:
-        if st.button("Override", use_container_width=True):
-            st.session_state["review_action"] = "Overridden by human reviewer"
+        override_reason = st.text_input("Override reason", key="override_reason")
+        if st.button("Override", disabled=not override_reason.strip(), use_container_width=True):
+            st.session_state["review_action"] = f"Overridden by human reviewer: {override_reason.strip()}"
 
     review_action = st.session_state.get("review_action")
     if review_action:

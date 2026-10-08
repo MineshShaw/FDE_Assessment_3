@@ -24,7 +24,27 @@ def test_catalog_search_matches_category_and_need() -> None:
     results = search_software_catalog("campaign task tracker", "Project Management")
     assert len(results) <= 2
     assert any(row["name"] == "TaskFlow" for row in results)
-    assert set(results[0]) == {"name", "desc"}
+    assert {"name", "desc", "category", "status", "vendor"} <= set(results[0])
+
+
+def test_catalog_search_prioritizes_exact_category_and_relevant_terms() -> None:
+    results = search_software_catalog("AI support assistant", "General AI")
+    assert results[0]["name"] == "NeuralDesk Business"
+
+
+def test_vendor_status_reports_expiry_and_conflict(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        tools,
+        "get_vendor_risk",
+        lambda vendor_name, timeout_seconds: {
+            "security_review_status": "expired",
+            "last_review_date": "2025-01-01",
+            "risk_level": "medium",
+        },
+    )
+    result = get_vendor_security_status("CodeMate")
+    assert result["review_expired"] is True
+    assert result["registry_api_conflict"] is True
 
 
 def test_vendor_security_status_uses_mock_service_and_handles_unknown_vendors(monkeypatch: pytest.MonkeyPatch) -> None:
