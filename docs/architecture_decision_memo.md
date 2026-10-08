@@ -1,9 +1,24 @@
 # Architecture Decision Memo
 
-**Which architecture would I ship—and why?** Ship **Single Agent as the default**, with Staged Two-Agent retained as an experimental audit-oriented option.
+**Decision.** Use Single Agent as the default and retain Staged Two-Agent as an experimental audit option. The simpler path uses fewer model interactions and has a smaller provider failure surface. Both paths share deterministic policy floors and human approval.
 
-**Evidence.** The repository now contains a policy-derived 16-case gold set and a real-run evaluator that records per-run latency, LLM/tool calls, traces, model, endpoint host, UTC time, and git SHA. `--offline-smoke` intentionally writes no results. A bounded live-provider attempt in this session did not complete, so there is no defensible live accuracy or latency number to cite and the prior offline artifact is not shipping evidence.
+**Evidence status.** No completed real-provider result file is currently present under `evaluation/results/`. The tracked `evaluation/benchmark_results.json` is not a real-run artifact and is not used as shipping evidence. Consequently, this memo deliberately reports no latency, call-count, accuracy, or reliability numbers. A reproducible live command is:
 
-**Decision rationale.** Single Agent has one fewer model call and a smaller failure surface. Both paths now apply deterministic policy floors after model output, but Staged still adds an Analyst-to-Reviewer handoff whose correctness depends on the evidence pack and request-derived fallback context. Staged remains useful for audit experiments because the typed handoff is inspectable, but it should not be the shipping default until repeated live-provider runs demonstrate equal or better correctness and latency.
+```bash
+PYTHONPATH=. .venv/bin/python evaluation/evaluator.py --runs 3 --sleep 2
+```
 
-**Tradeoff and guardrails.** Single Agent remains the conservative default because it uses one fewer model call and has a smaller failure surface. Staged remains an audit-oriented option, not a proven winner. Before submission, run `evaluation/evaluator.py --runs 3 --sleep 2` with a configured provider and commit only the resulting timestamped real-run artifact; both paths use deterministic policy floors, retries, sanitized messages, Pydantic validation, and human approval.
+That command requires a provider key, runs both architectures on identical policy-derived cases, includes the deterministic baseline, and writes a timestamped result containing model, endpoint host, UTC time, git SHA, per-case outcomes, latency, LLM calls, tool calls, and failures.
+
+| Metric | Single Agent | Staged Two-Agent | Policy engine only |
+|---|---|---|---|
+| Correct recommendation | pending real run | pending real run | pending real run |
+| Approval precision / recall | pending real run | pending real run | pending real run |
+| Grounded evidence | pending real run | pending real run | pending real run |
+| Escalation correctness | pending real run | pending real run | pending real run |
+| Mean latency | pending real run | pending real run | pending real run |
+| Mean LLM calls | pending real run | pending real run | zero by design |
+| Mean tool calls | pending real run | pending real run | pending real run |
+| Failures | pending real run | pending real run | pending real run |
+
+**Limits.** The case set is synthetic and finite, and model output is nondeterministic. The decision must be revisited after repeated live runs; smoke mode is plumbing validation only, not a benchmark.

@@ -23,7 +23,7 @@ For validation without the UI:
 ```bash
 python verify_setup.py
 python -m pytest
-python evaluation/evaluator.py
+PYTHONPATH=. .venv/bin/python evaluation/evaluator.py --offline-smoke
 ```
 
 ## Configuration
@@ -41,13 +41,13 @@ OPENAI_BASE_URL="https://api.groq.com/openai/v1"
 
 ## Data and tools
 
-`src/data_loader.py` loads the complete synthetic snapshot into memory as Pandas DataFrames: employees, budgets, software catalog, vendors, purchase history, requests, vendor risk, and policy text. No database is required. The deterministic tools in `src/tools.py` query those frames for budget availability, catalog overlap, vendor security status, and approval/risk rules.
+`src/data_loader.py` loads the complete synthetic snapshot into memory as Pandas DataFrames: employees, budgets, software catalog, vendors, purchase history, requests, vendor risk, and policy text. No database is required. The deterministic tools in `src/tools.py` query those frames for budget availability, ranked catalog overlap, vendor security status, computed expiry/conflict, and approval/risk rules.
 
 Both agent architectures use explicit pure-Python `while` loops. The loop sends a request through the OpenAI SDK, executes returned tool calls locally, appends tool results to the message history, and stops when validated Pydantic JSON is returned. Each loop is capped at 10 iterations. The staged design separates an Analyst evidence pack from a Reviewer policy decision.
 
 ## Evaluation
 
-`evaluation/gold_cases.json` contains 16 policy-derived cases: the 10 request records plus four threshold boundary cases, an unknown-requester case, and a prompt-injection case. Gold expectations cite the policy and are scored independently from `evaluate_request`; disagreements should be reviewed rather than silently rewritten.
+`evaluation/gold_cases.json` contains policy-derived cases from the request records plus threshold, unknown-requester, and prompt-injection variants. Gold expectations cite the policy and are scored independently from `evaluate_request`; disagreements should be reviewed rather than silently rewritten.
 
 - normal and low-value requests;
 - missing user counts;
@@ -60,7 +60,7 @@ Both agent architectures use explicit pure-Python `while` loops. The loop sends 
 
 Run `PYTHONPATH=. .venv/bin/python evaluation/evaluator.py --runs 3 --sleep 2` with `GROQ_API_KEY` or `OPENAI_API_KEY` configured to execute both architectures against identical request data, include the policy-engine baseline, validate exact approvals/risk flags/evidence grounding, count LLM/tool calls, measure latency, print a Markdown summary, and write timestamped results under `evaluation/results/`. Normal mode fails without credentials; `--offline-smoke` only checks plumbing and writes no benchmark results. Live results should be regenerated before submission and are never substituted with fixture outputs.
 
-There is intentionally no shipping comparison table here until a repeated live-provider run completes. Offline smoke is not a benchmark and must not be used as latency or reliability evidence.
+There is intentionally no shipping comparison table here until a repeated live-provider run completes. Offline smoke is not a benchmark and must not be used as latency or reliability evidence. The decision memo contains the pending comparison schema.
 
 The original public contract adapter remains available through:
 
@@ -85,8 +85,8 @@ tests/                Data, tool, and orchestration tests
 
 ## Assumptions and known limitations
 
-All data is synthetic and small enough to load into memory. The committed benchmark uses an offline SDK-shaped stub (`execution_mode: offline_stub`), so its latency is orchestration overhead rather than production model latency. A live provider run requires a configured key and may require the local vendor-risk service for API-backed evidence. Real deployment should add provider retries, token/cost telemetry, broader hidden-case coverage, and operational authentication. Vendor-risk service outages remain explicit uncertainty and require human review.
+All data is synthetic and small enough to load into memory. A real benchmark requires a configured provider and records per-run metadata and traces; smoke mode is not evidence. Both agent paths use deterministic policy floors, bounded provider retries, explicit tool errors, and human review. Vendor-risk service outages remain explicit uncertainty and require human review.
 
 ## Final ship decision
 
-Use **Single Agent as the default**: it uses one fewer model call and has the smaller failure surface. Keep Staged Two-Agent as an experimental/audit-oriented option until a repeated live-provider benchmark demonstrates equal or better correctness and latency. Both passed 10/10 in the offline fixture, but those results do not establish production model performance.
+Use **Single Agent as the default**: it uses one fewer model call and has the smaller failure surface. Keep Staged Two-Agent as an experimental/audit-oriented option until a repeated live-provider benchmark demonstrates equal or better correctness and latency. No completed live comparison is currently available.

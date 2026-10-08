@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import date
 from numbers import Real
+import re
 
 import pandas as pd
 import requests
@@ -13,6 +14,20 @@ from src.vendor_client import get_vendor_risk
 
 LOGGER = logging.getLogger(__name__)
 REFERENCE_DATE = date(2026, 9, 30)
+STOPWORDS = {"a", "an", "and", "for", "the", "to", "with", "of", "in", "tool", "need", "wants"}
+
+
+def _json_value(value):
+    """Convert Pandas/provider scalar values into strict-JSON-compatible values."""
+    if value is None or value is pd.NaT:
+        return None
+    if pd.isna(value):
+        return None
+    if isinstance(value, (pd.Timestamp, date)):
+        return value.isoformat()
+    if hasattr(value, "item"):
+        return value.item()
+    return value
 
 
 def _data() -> dict[str, pd.DataFrame]:
@@ -52,13 +67,16 @@ def check_budget(department_id: str, amount: float) -> dict:
 
 
 def search_software_catalog(need_description: str, category: str) -> list[dict] | dict:
-    """Return at most two concise catalog matches or a safe error envelope."""
+    """Return up to five ranked catalog matches or a safe error envelope."""
     try:
         if not isinstance(need_description, str) or not isinstance(category, str):
             raise ValueError("need_description and category must be strings")
         catalog = _data()["software_catalog"]
         category_query = category.strip().casefold()
-        need_terms = {term for term in need_description.casefold().split() if len(term) > 2}
+        need_terms = {
+            term for term in re.findall(r"[a-z0-9]+", need_description.casefold())
+            if len(term) > 2 and term not in STOPWORDS
+        }
         rows: list[tuple[int, dict]] = []
         for _, row in catalog.fillna("").iterrows():
             row_category = str(row["category"]).casefold()
@@ -66,23 +84,31 @@ def search_software_catalog(need_description: str, category: str) -> list[dict] 
                 str(row[column]).casefold()
                 for column in ("product_name", "category", "vendor_name", "notes")
             )
+            name = str(row["product_name"]).casefold()
+            vendor = str(row["vendor_name"]).casefold()
             category_score = 100 if category_query and row_category == category_query else 0
+            vendor_score = 50 if vendor in need_description.casefold() else 0
+            name_score = 25 if any(term in name for term in need_terms) else 0
             term_score = sum(1 for term in need_terms if term in row_text)
-            if category_score or term_score:
+            score = category_score + vendor_score + name_score + term_score
+            if score:
                 rows.append(
                     (
-                        category_score + term_score,
+                        score,
                         {
                             "name": str(row["product_name"]),
                             "desc": str(row["notes"]),
                             "category": str(row["category"]),
                             "status": str(row["status"]),
                             "vendor": str(row["vendor_name"]),
+                            "scope": str(row["scope"]),
+                            "licensed_seats": int(row["licensed_seats"]),
+                            "annual_cost_usd": float(row["annual_cost_usd"]),
                         },
                     )
                 )
         rows.sort(key=lambda item: item[0], reverse=True)
-        return [item[1] for item in rows[:2]]
+        return [item[1] for item in rows[:5]]
     except Exception as exc:
         return {"error": f"catalog search failed: {exc}"}
 
@@ -99,10 +125,14 @@ def get_vendor_security_status(vendor_name: str) -> dict:
         risk = data["vendor_risk"]
         risk_match = risk[risk["vendor_name"].astype(str).str.casefold() == name.casefold()]
         api_risk: dict | None = None
+        data_source = "api"
+        fallback_note = None
         try:
             api_risk = get_vendor_risk(name, timeout_seconds=0.5)
         except requests.RequestException as exc:
             LOGGER.warning("Vendor risk API unavailable for %s, using local snapshot fallback: %s", name, exc)
+            data_source = "local_snapshot_fallback"
+            fallback_note = f"Vendor-risk API could not be verified: {exc}"
 
         if registry.empty and risk_match.empty and api_risk is None:
             return {"status": "not found", "vendor_name": name}
@@ -121,9 +151,11 @@ def get_vendor_security_status(vendor_name: str) -> dict:
         if api_risk is not None:
             result.update(
                 {
-                    "risk_level": api_risk.get("risk_level", "unknown"),
-                    "security_review_status": api_risk.get("security_review_status", "unknown"),
-                    "last_review_date": api_risk.get("last_review_date"),
+                    "risk_level": _json_value(api_risk.get("risk_level", "unknown")),
+                    "security_review_status": _json_value(
+                        api_risk.get("security_review_status", "unknown")
+                    ),
+                    "last_review_date": _json_value(api_risk.get("last_review_date")),
                     "risk_service_available": True,
                 }
             )
@@ -131,14 +163,19 @@ def get_vendor_security_status(vendor_name: str) -> dict:
             row = risk_match.iloc[0]
             result.update(
                 {
-                    "risk_level": row.get("risk_level", "unknown"),
-                    "security_review_status": row.get("security_review_status", "unknown"),
-                    "last_review_date": row.get("last_review_date"),
-                    "risk_service_available": not bool(row.get("force_error", False)),
+                    "risk_level": _json_value(row.get("risk_level", "unknown")),
+                    "security_review_status": (
+                        _json_value(row.get("security_review_status", "unknown"))
+                    ),
+                    "last_review_date": _json_value(row.get("last_review_date")),
+                    "risk_service_available": False,
                 }
             )
         else:
             result["risk_service_available"] = False
+        result["data_source"] = data_source
+        if fallback_note:
+            result["notes"] = fallback_note
         review_date = result.get("last_review_date") or result.get("security_review_date")
         try:
             result["review_expired"] = (
@@ -149,12 +186,13 @@ def get_vendor_security_status(vendor_name: str) -> dict:
             result["review_expired"] = True
         result["security_review_status"] = str(result.get("security_review_status", "unknown"))
         result["risk_level"] = str(result.get("risk_level", "unknown"))
-        result["registry_api_conflict"] = bool(
+        result["evidence_conflict"] = bool(
             result.get("security_status")
             and result.get("security_review_status")
             and str(result["security_status"]).casefold()
             != result["security_review_status"].casefold()
         )
+        result["registry_api_conflict"] = result["evidence_conflict"]
         return result
     except Exception as exc:
         return {"error": f"vendor security lookup failed: {exc}"}
