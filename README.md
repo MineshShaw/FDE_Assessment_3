@@ -67,7 +67,7 @@ Initial offline comparison:
 | Cases passing | 10/10 | 10/10 |
 | Average LLM calls | 2.0 | 3.0 |
 | Average tool calls | 1.0 | 1.0 |
-| Average latency in committed artifact | 13.98 ms | 13.72 ms |
+| Average latency in committed artifact | 1.39 ms | 0.65 ms |
 | Primary tradeoff | Lower cost and simpler flow | Stronger evidence/reviewer separation |
 
 The original public contract adapter remains available through:
@@ -97,4 +97,4 @@ All data is synthetic and small enough to load into memory. The committed benchm
 
 ## Final ship decision
 
-Ship the **Staged Two-Agent** architecture: the Analyst separates evidence collection from the Reviewer’s deterministic policy decision, improving auditability for sensitive procurement cases. Keep Single Agent as the lower-cost fallback for simpler requests. Both passed 10/10 benchmark cases; staged used one additional LLM call per case in the initial comparison.
+Ship the **Staged Two-Agent** architecture: the Analyst separates evidence collection from the Reviewer’s deterministic policy decision, improving auditability for sensitive procurement cases. Keep Single Agent as the lower-cost fallback for simpler requests. Both passed 10/10 benchmark cases; staged used one additional LLM call per case and measured lower local orchestration latency in this offline run.

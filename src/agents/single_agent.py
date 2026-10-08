@@ -6,8 +6,10 @@ from src.agents._common import (
     TOOL_SCHEMAS,
     append_assistant_message,
     execute_tool_call,
+    enforce_policy_floor,
     message_from_response,
     parse_model,
+    policy_result_from_messages,
     value,
 )
 from src.llm_client import MODEL_NAME, client, sanitize_messages
@@ -85,7 +87,8 @@ def run_single_agent(request: str) -> ProcurementOutput:
         validation_error: Exception | None = None
         for attempt in range(MAX_VALIDATION_RETRIES + 1):
             try:
-                return parse_model(value(message, "content"), ProcurementOutput)
+                output = parse_model(value(message, "content"), ProcurementOutput)
+                return enforce_policy_floor(output, policy_result_from_messages(request, messages))
             except (ValidationError, ValueError) as exc:
                 validation_error = exc
                 if attempt == MAX_VALIDATION_RETRIES:

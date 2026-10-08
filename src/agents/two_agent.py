@@ -8,6 +8,7 @@ from src.agents._common import (
     TOOL_SCHEMAS,
     append_assistant_message,
     execute_tool_call,
+    enforce_policy_floor,
     message_from_response,
     parse_model,
     value,
@@ -156,7 +157,8 @@ def run_two_agent(request: str) -> ProcurementOutput:
     validation_error: Exception | None = None
     for attempt in range(MAX_VALIDATION_RETRIES + 1):
         try:
-            return parse_model(value(message, "content"), ProcurementOutput)
+            output = parse_model(value(message, "content"), ProcurementOutput)
+            return enforce_policy_floor(output, policy_result)
         except (ValidationError, ValueError) as exc:
             validation_error = exc
             if attempt == MAX_VALIDATION_RETRIES:
@@ -181,7 +183,7 @@ def run_two_agent(request: str) -> ProcurementOutput:
 
 
 def _number_from_pack(pack: StructuredEvidencePack, key: str) -> float:
-    value = pack.budget_status.get(key, 0)
+    value = pack.budget_status.get(key, pack.budget_status.get("requested_amount", 0))
     try:
         return float(value)
     except (TypeError, ValueError) as exc:

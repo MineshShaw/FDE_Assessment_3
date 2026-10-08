@@ -129,7 +129,7 @@ def test_single_agent_executes_tool_then_parses_output(monkeypatch: pytest.Monke
 
     result = single_agent.run_single_agent("Marketing requests a $5,000 internal tool.")
 
-    assert result.recommendation == "APPROVE"
+    assert result.recommendation == "ESCALATE_TO_HUMAN"
     assert len(calls) == 2
     assert calls[1]["messages"][-1]["role"] == "tool"
     assert calls[1]["tool_choice"] == "auto"
@@ -209,7 +209,7 @@ def test_single_agent_forces_tool_termination_before_final_iteration(
     )
     result = single_agent.run_single_agent("A request that needs evidence.")
 
-    assert result.recommendation == "REQUEST_INFO"
+    assert result.recommendation == "ESCALATE_TO_HUMAN"
     assert calls[-1]["tool_choice"] == "none"
     assert len(calls) == 9
 
@@ -300,7 +300,7 @@ def test_two_agent_retries_invalid_analyst_evidence_pack(monkeypatch: pytest.Mon
 
     result = two_agent.run_two_agent("Marketing requests a procurement decision.")
 
-    assert result.recommendation == "REQUEST_INFO"
+    assert result.recommendation == "ESCALATE_TO_HUMAN"
     assert calls[0].get("response_format") is None
     assert calls[1]["tool_choice"] == "none"
     assert calls[1]["response_format"] == {"type": "json_object"}

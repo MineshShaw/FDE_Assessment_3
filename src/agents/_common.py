@@ -101,6 +101,54 @@ def parse_model(content: str | None, model_type: type[BaseModel]) -> BaseModel:
     return model_type.model_validate(payload)
 
 
+def policy_result_from_messages(request: str, messages: list[dict]) -> dict | None:
+    """Build a deterministic policy result from tool evidence in the history."""
+    amount: float | None = None
+    vendor_risk = "unknown"
+    classification = "internal"
+    for message in messages:
+        if message.get("role") != "tool":
+            continue
+        try:
+            payload = json.loads(message.get("content", ""))
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if "requested_amount" in payload:
+            amount = float(payload["requested_amount"])
+        if "risk_level" in payload:
+            vendor_risk = str(payload["risk_level"])
+    lowered = request.casefold()
+    for candidate in ("customer_pii", "employee_pii", "source_code", "confidential_documents", "production"):
+        if candidate in lowered:
+            classification = candidate
+            break
+    if amount is None:
+        return None
+    return evaluate_policy_rules(amount, vendor_risk, classification)
+
+
+def enforce_policy_floor(output: BaseModel, policy_result: dict | None) -> BaseModel:
+    """Prevent model output from weakening deterministic approval requirements."""
+    if not policy_result or "error" in policy_result:
+        return output
+    approvals = list(dict.fromkeys(output.approvals_required + policy_result.get("approvals_required", [])))
+    risk_flags = list(dict.fromkeys(output.risk_flags + policy_result.get("risk_flags", [])))
+    recommendation = output.recommendation
+    if output.missing_information:
+        recommendation = "REQUEST_INFO"
+    elif approvals or risk_flags:
+        recommendation = "ESCALATE_TO_HUMAN"
+    return output.model_copy(
+        update={
+            "recommendation": recommendation,
+            "approvals_required": approvals,
+            "risk_flags": risk_flags,
+        }
+    )
+
+
 def execute_tool_call(tool_call: Any) -> str:
     function = value(tool_call, "function", {})
     name = value(function, "name")

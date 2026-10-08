@@ -40,6 +40,7 @@ def check_budget(department_id: str, amount: float) -> dict:
         remaining = float(row["available_usd"]) - amount
         return {
             "department": str(row["department"]),
+            "requested_amount": amount,
             "available_funds": float(row["available_usd"]),
             "remaining_funds": remaining,
             "within_budget": remaining >= 0,
