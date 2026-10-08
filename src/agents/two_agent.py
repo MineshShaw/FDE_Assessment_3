@@ -11,6 +11,8 @@ from src.agents._common import (
     enforce_policy_floor,
     message_from_response,
     parse_model,
+    policy_result_from_messages,
+    policy_result_from_request,
     value,
 )
 from src.llm_client import MODEL_NAME, client, sanitize_messages
@@ -131,11 +133,32 @@ def run_two_agent(request: str) -> ProcurementOutput:
     )
 
     # The reviewer applies this deterministic check before asking the LLM to phrase the final result.
-    policy_result = evaluate_policy_rules(
-        amount=_number_from_pack(evidence_pack, "amount"),
+    policy_result = policy_result_from_request(
+        request,
         vendor_risk=str(evidence_pack.vendor_risk.get("risk_level", "unknown")),
-        data_classification=_classification_from_request(request),
     )
+    pack_amount = _number_from_pack(evidence_pack, "amount")
+    request_policy = policy_result_from_request(
+        request,
+        vendor_risk=str(evidence_pack.vendor_risk.get("risk_level", "unknown")),
+    )
+    if pack_amount > 0:
+        policy_result = evaluate_policy_rules(
+            amount=pack_amount,
+            vendor_risk=str(evidence_pack.vendor_risk.get("risk_level", "unknown")),
+            data_classification=_classification_from_request(request),
+        )
+        policy_result["approvals_required"] = list(
+            dict.fromkeys(
+                request_policy.get("approvals_required", [])
+                + policy_result.get("approvals_required", [])
+            )
+        )
+        policy_result["risk_flags"] = list(
+            dict.fromkeys(
+                request_policy.get("risk_flags", []) + policy_result.get("risk_flags", [])
+            )
+        )
     evidence_pack_json = json.dumps(evidence_pack.model_dump())
     reviewer_user_prompt = (
         f"Original Request:\n{request}\n\n"
@@ -187,12 +210,19 @@ def _number_from_pack(pack: StructuredEvidencePack, key: str) -> float:
     try:
         return float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"Evidence pack is missing numeric {key}") from exc
+        return 0.0
 
 
 def _classification_from_request(request: str) -> str:
     lowered = request.casefold()
-    for classification in ("customer_pii", "employee_pii", "source_code", "confidential_documents", "production"):
-        if classification in lowered:
-            return classification
+    if "customer pii" in lowered or "customer_pii" in lowered:
+        return "customer_pii"
+    if "employee pii" in lowered or "employee_pii" in lowered:
+        return "employee_pii"
+    if "source code" in lowered or "source_code" in lowered:
+        return "source_code"
+    if "confidential document" in lowered or "confidential_documents" in lowered:
+        return "confidential_documents"
+    if "production" in lowered:
+        return "production"
     return "internal"

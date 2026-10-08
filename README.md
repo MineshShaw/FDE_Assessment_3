@@ -67,7 +67,7 @@ Initial offline comparison:
 | Cases passing | 10/10 | 10/10 |
 | Average LLM calls | 2.0 | 3.0 |
 | Average tool calls | 1.0 | 1.0 |
-| Average latency in committed artifact | 1.39 ms | 0.65 ms |
+| Average latency in committed artifact | 1.47 ms | 0.76 ms |
 | Primary tradeoff | Lower cost and simpler flow | Stronger evidence/reviewer separation |
 
 The original public contract adapter remains available through:

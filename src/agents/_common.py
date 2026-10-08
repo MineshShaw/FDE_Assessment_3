@@ -122,13 +122,19 @@ def policy_result_from_messages(request: str, messages: list[dict]) -> dict | No
     request_amount = re.search(r"\$([\d,]+(?:\.\d+)?)", request)
     if request_amount:
         amount = float(request_amount.group(1).replace(",", ""))
-    if "timeout" in request.casefold() or "expired" in request.casefold():
+    if any(term in request.casefold() for term in ("timeout", "timed out", "expired")):
         vendor_risk = "unknown"
     lowered = request.casefold()
-    for candidate in ("customer_pii", "employee_pii", "source_code", "confidential_documents", "production"):
-        if candidate in lowered:
-            classification = candidate
-            break
+    if re.search(r"\bcustomer[\s_-]+pii\b", lowered):
+        classification = "customer_pii"
+    elif re.search(r"\bemployee[\s_-]+pii\b", lowered):
+        classification = "employee_pii"
+    elif "source code" in lowered or "source_code" in lowered:
+        classification = "source_code"
+    elif "confidential document" in lowered:
+        classification = "confidential_documents"
+    elif "production" in lowered:
+        classification = "production"
     if amount is None:
         return None
     result = evaluate_policy_rules(amount, vendor_risk, classification)
@@ -143,6 +149,23 @@ def policy_result_from_messages(request: str, messages: list[dict]) -> dict | No
         result.setdefault("risk_flags", []).append("legal_review_required")
     result["risk_flags"] = list(dict.fromkeys(result.get("risk_flags", [])))
     return result
+
+
+def policy_result_from_request(request: str, *, vendor_risk: str = "unknown") -> dict:
+    """Evaluate policy from request text without trusting model-generated fields."""
+    amount_match = re.search(r"\$([\d,]+(?:\.\d+)?)", request)
+    amount = float(amount_match.group(1).replace(",", "")) if amount_match else 0.0
+    return policy_result_from_messages(
+        request,
+        [
+            {
+                "role": "tool",
+                "content": json.dumps(
+                    {"requested_amount": amount, "risk_level": vendor_risk}
+                ),
+            }
+        ],
+    ) or {"error": "unable to derive policy context from request"}
 
 
 def enforce_policy_floor(output: BaseModel, policy_result: dict | None) -> BaseModel:

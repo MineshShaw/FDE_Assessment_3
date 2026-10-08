@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -96,7 +97,10 @@ class OfflineClient:
         if not has_tool_result and kwargs.get("tools"):
             call = _tool_call(
                 "check_budget",
-                {"department_id": "Marketing", "amount": 5000},
+                {
+                    "department_id": _request_department(self.request),
+                    "amount": _request_amount(self.request),
+                },
             )
             return _message(tool_calls=[call])
         if self.staged and kwargs.get("tools"):
@@ -224,7 +228,18 @@ def main() -> None:
             results.append(_run_case(case, architecture))
         if live:
             time.sleep(2)
-    RESULTS_PATH.write_text(json.dumps(results, indent=2), encoding="utf-8")
+    metadata = {
+        "execution_mode": "offline_stub" if not live else "openai_sdk",
+        "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "git_commit": subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip() or "unknown",
+        "results": results,
+    }
+    RESULTS_PATH.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
     print("| Architecture | Passes | Cases | Avg latency (ms) | Tool calls | LLM calls |")
     print("|---|---:|---:|---:|---:|---:|")
