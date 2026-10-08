@@ -16,14 +16,16 @@ trap cleanup EXIT
 ./run.sh >"$log_file" 2>&1 &
 streamlit_pid=$!
 
-for _ in {1..7}; do
+for _ in {1..60}; do
     sleep 1
-    if [[ "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8501/_stcore/health)" == "200" ]]; then
+    dashboard_status="$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8501/_stcore/health || true)"
+    api_status="$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8001/health || true)"
+    if [[ "$dashboard_status" == "200" && "$api_status" == "200" ]]; then
         echo "Dashboard healthcheck passed (HTTP 200)."
         exit 0
     fi
 done
 
-echo "Dashboard healthcheck failed." >&2
+echo "Dashboard or vendor-risk API healthcheck failed." >&2
 cat "$log_file" >&2
 exit 1
