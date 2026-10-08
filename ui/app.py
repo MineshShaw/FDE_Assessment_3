@@ -65,6 +65,9 @@ with st.expander("Request details", expanded=True):
         employee = load_employees()
         employee_row = employee[employee["employee_id"] == selected_case["requester_id"]]
         department = employee_row.iloc[0]["department"] if not employee_row.empty else "Unknown"
+        manager_id = employee_row.iloc[0]["manager_id"] if not employee_row.empty else None
+        manager_row = employee[employee["employee_id"] == manager_id]
+        manager = manager_row.iloc[0]["name"] if not manager_row.empty else (manager_id or "Unknown")
         budget_rows = load_budgets()
         budget_row = budget_rows[budget_rows["department"] == department]
         available_budget = (
@@ -73,7 +76,7 @@ with st.expander("Request details", expanded=True):
         details = {
             "Requester": selected_case["requester_id"],
             "Department": department,
-            "Manager": employee_row.iloc[0]["manager"] if not employee_row.empty else "Unknown",
+            "Manager": manager,
             "Available budget": available_budget,
             "Vendor": selected_case["vendor_name"],
             "Amount": selected_case["annual_cost_usd"],
