@@ -16,9 +16,18 @@ from src.tools import (
     search_software_catalog,
 )
 from src.data_access import load_employees
+from src.schemas import ProcurementOutput
 
 
 LOGGER = logging.getLogger(__name__)
+INJECTION_PATTERNS = (
+    r"\bignore\s+(?:all|previous)\b.{0,80}\b(?:rules|instructions)\b",
+    r"\bapprove(?:\s+it)?\s+immediately\b",
+    r"\btreat\s+this\s+as\b.{0,40}\bapproved\b",
+    r"\bbypass\b.{0,40}\b(?:controls|rules|approval|security)\b",
+    r"\bsystem\s+prompt\b",
+    r"\breveal\b.{0,40}\b(?:key|secret|credential)\b",
+)
 
 
 TOOL_SCHEMAS = [
@@ -108,20 +117,44 @@ def parse_model(content: str | None, model_type: type[BaseModel]) -> BaseModel:
     return model_type.model_validate(payload)
 
 
+def detect_injection(text: object) -> bool:
+    """Detect specific instruction-like phrases in untrusted business data."""
+    if not isinstance(text, str):
+        return False
+    return any(re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL) for pattern in INJECTION_PATTERNS)
+
+
+def untrusted_block(label: str, content: object) -> str:
+    return f"--- BEGIN UNTRUSTED DATA: {label} ---\n{content}\n--- END UNTRUSTED DATA: {label} ---"
+
+
+def request_contains_injection(request: str, request_data: dict | None = None) -> bool:
+    values = [request]
+    if request_data:
+        values.extend(str(value) for value in request_data.values())
+    return any(detect_injection(value) for value in values)
+
+
 def policy_result_from_messages(request: str, messages: list[dict]) -> dict | None:
     """Build a deterministic policy result from tool evidence in the history."""
     amount: float | None = None
     vendor_risk = "unknown"
     classification = "internal"
+    injection_detected = False
     for message in messages:
         if message.get("role") != "tool":
             continue
+        tool_content = message.get("content", "")
+        if isinstance(tool_content, str) and "BEGIN UNTRUSTED DATA" in tool_content:
+            tool_content = tool_content.split("\n", 1)[1].rsplit("\n--- END", 1)[0]
         try:
-            payload = json.loads(message.get("content", ""))
+            payload = json.loads(tool_content)
         except (TypeError, json.JSONDecodeError):
             continue
         if not isinstance(payload, dict):
             continue
+        if detect_injection(tool_content):
+            injection_detected = True
         if "requested_amount" in payload:
             amount = float(payload["requested_amount"])
         if "risk_level" in payload:
@@ -146,7 +179,9 @@ def policy_result_from_messages(request: str, messages: list[dict]) -> dict | No
         return None
     result = evaluate_policy_rules(amount, vendor_risk, classification)
     lowered = request.casefold()
-    if any(term in lowered for term in ("ignore all procurement rules", "approve immediately", "bypass controls")):
+    if request_contains_injection(request):
+        result.setdefault("risk_flags", []).append("prompt_injection_detected")
+    if injection_detected:
         result.setdefault("risk_flags", []).append("prompt_injection_detected")
     if "exceeding" in lowered or "over budget" in lowered:
         result.setdefault("risk_flags", []).append("budget_insufficient")
@@ -219,7 +254,7 @@ def execute_tool_call(tool_call: Any, pinned: dict | None = None) -> str:
         return json.dumps({"error": f"Unsupported tool requested by model: {name}"})
     try:
         kwargs = json.loads(arguments) if isinstance(arguments, str) else arguments
-    except json.JSONDecodeError:
+    except (TypeError, json.JSONDecodeError):
         return json.dumps({"error": f"Invalid arguments for tool {name}"})
     if not isinstance(kwargs, dict):
         return json.dumps({"error": f"Arguments for tool {name} must be an object"})
@@ -257,6 +292,24 @@ def request_facts(request_data: dict | None) -> dict | None:
     if not employee.empty:
         facts["department_id"] = str(employee.iloc[0]["department"])
     return {key: value for key, value in facts.items() if value is not None}
+
+
+def failure_output(
+    flag: str,
+    *,
+    request_data: dict | None = None,
+    floor: ProcurementOutput | None = None,
+) -> ProcurementOutput:
+    output = ProcurementOutput(
+        recommendation="ESCALATE_TO_HUMAN",
+        risk_flags=[flag],
+        next_step="Manual review required: automated analysis failed.",
+        evidence=[f"Automated analysis failed: {flag}"],
+    )
+    if request_data is not None and floor is not None:
+        from src.guardrails import apply_policy_floor
+        return apply_policy_floor(output, floor)
+    return output
 
 
 def append_assistant_message(messages: list[dict], message: Any) -> None:

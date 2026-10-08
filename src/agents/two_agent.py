@@ -14,6 +14,10 @@ from src.agents._common import (
     policy_result_from_request,
     request_facts,
     value,
+    failure_output,
+    detect_injection,
+    request_contains_injection,
+    untrusted_block,
 )
 from src.llm_client import MODEL_NAME, chat_completion_with_retry, client, sanitize_messages
 from src.schemas import ProcurementOutput, StructuredEvidencePack
@@ -49,12 +53,16 @@ def _run_analyst(request: str, request_data: dict | None = None) -> StructuredEv
         {
             "role": "user",
             "content": (
-                request if request_data is None else
-                f"{request}\n\nDeterministic request facts:\n{json.dumps(request_data, default=str)}"
+                untrusted_block(
+                    "request",
+                    request if request_data is None else
+                    f"{request}\n\nDeterministic request facts:\n{json.dumps(request_data, default=str)}",
+                )
             ),
         },
     ]
     iteration = 0
+    injection_detected = False
     while iteration < MAX_ITERATIONS:
         iteration += 1
         bailout = iteration == MAX_ITERATIONS - 1
@@ -86,18 +94,26 @@ def _run_analyst(request: str, request_data: dict | None = None) -> StructuredEv
         append_assistant_message(messages, message)
         if tool_calls:
             for tool_call in tool_calls:
+                tool_result = execute_tool_call(tool_call, pinned=request_facts(request_data))
+                injection_detected = injection_detected or detect_injection(tool_result)
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": value(tool_call, "id"),
-                        "content": execute_tool_call(tool_call, pinned=request_facts(request_data)),
+                        "content": untrusted_block(
+                            "tool result",
+                            tool_result,
+                        ),
                     }
                 )
             continue
         validation_error: Exception | None = None
         for attempt in range(MAX_VALIDATION_RETRIES + 1):
             try:
-                return parse_model(value(message, "content"), StructuredEvidencePack)
+                pack = parse_model(value(message, "content"), StructuredEvidencePack)
+                if injection_detected:
+                    pack.vendor_risk["prompt_injection_detected"] = True
+                return pack
             except (ValidationError, ValueError) as exc:
                 validation_error = exc
                 if attempt == MAX_VALIDATION_RETRIES:
@@ -125,7 +141,7 @@ def _run_analyst(request: str, request_data: dict | None = None) -> StructuredEv
     raise RuntimeError(f"Analyst orchestration exceeded {MAX_ITERATIONS} iterations")
 
 
-def run_two_agent(request: str, request_data: dict | None = None) -> ProcurementOutput:
+def _run_two_agent(request: str, request_data: dict | None = None) -> ProcurementOutput:
     if client is None:
         raise RuntimeError("GROQ_API_KEY or OPENAI_API_KEY is required to run the two-agent architecture")
     evidence_pack = _run_analyst(request, request_data=request_data)
@@ -147,6 +163,7 @@ def run_two_agent(request: str, request_data: dict | None = None) -> Procurement
         request,
         vendor_risk=str(evidence_pack.vendor_risk.get("risk_level", "unknown")),
     )
+    evidence_pack_json = json.dumps(evidence_pack.model_dump())
     pack_amount = _number_from_pack(evidence_pack, "amount")
     request_policy = policy_result_from_request(
         request,
@@ -169,16 +186,22 @@ def run_two_agent(request: str, request_data: dict | None = None) -> Procurement
                 request_policy.get("risk_flags", []) + policy_result.get("risk_flags", [])
             )
         )
+    if (
+        request_contains_injection(request, request_data)
+        or detect_injection(evidence_pack_json)
+        or evidence_pack.vendor_risk.get("prompt_injection_detected")
+    ):
+        policy_result.setdefault("risk_flags", []).append("prompt_injection_detected")
+        policy_result["risk_flags"] = list(dict.fromkeys(policy_result["risk_flags"]))
     elif "error" in policy_result:
         policy_result = {
             "error": "policy result unavailable: amount not established",
             "approvals_required": [],
             "risk_flags": ["policy_unverified"],
         }
-    evidence_pack_json = json.dumps(evidence_pack.model_dump())
     reviewer_user_prompt = (
-        f"Original Request:\n{request}\n\n"
-        f"Evidence Pack from Analyst:\n{evidence_pack_json}\n\n"
+        f"Original Request:\n{untrusted_block('original request', request)}\n\n"
+        f"Evidence Pack from Analyst:\n{untrusted_block('evidence pack', evidence_pack_json)}\n\n"
         f"Deterministic policy result:\n{json.dumps(policy_result)}\n\n"
         "If the policy result is unavailable, do not approve; mark policy_unverified and escalate.\n"
         "Apply policy using the request's amount, vendor risk, and data classification."
@@ -225,6 +248,17 @@ def run_two_agent(request: str, request_data: dict | None = None) -> Procurement
             )
             message = message_from_response(retry_response)
     return ProcurementOutput(recommendation="ESCALATE_TO_HUMAN")
+
+
+def run_two_agent(request: str, request_data: dict | None = None) -> ProcurementOutput:
+    try:
+        return _run_two_agent(request, request_data)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).exception("Two-agent execution failed")
+        floor = evaluate_request(request_data) if request_data is not None else None
+        flag = "llm_output_invalid" if isinstance(exc, (ValidationError, ValueError)) else "llm_unavailable"
+        return failure_output(flag, request_data=request_data, floor=floor)
 
 
 def _number_from_pack(pack: StructuredEvidencePack, key: str) -> float:

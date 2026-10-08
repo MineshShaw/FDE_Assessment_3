@@ -12,6 +12,9 @@ from src.agents._common import (
     parse_model,
     policy_result_from_messages,
     request_facts,
+    failure_output,
+    request_contains_injection,
+    untrusted_block,
     value,
 )
 from src.llm_client import MODEL_NAME, chat_completion_with_retry, client, sanitize_messages
@@ -24,7 +27,7 @@ MAX_ITERATIONS = 10
 MAX_VALIDATION_RETRIES = 2
 
 
-def run_single_agent(request: str, request_data: dict | None = None) -> ProcurementOutput:
+def _run_single_agent(request: str, request_data: dict | None = None) -> ProcurementOutput:
     if client is None:
         raise RuntimeError("GROQ_API_KEY or OPENAI_API_KEY is required to run the single-agent architecture")
     messages: list[dict] = [
@@ -49,9 +52,11 @@ def run_single_agent(request: str, request_data: dict | None = None) -> Procurem
         {
             "role": "user",
             "content": (
-                request
-                if request_data is None
-                else f"{request}\n\nDeterministic request facts:\n{json.dumps(request_data, default=str)}"
+                untrusted_block(
+                    "request",
+                    request if request_data is None else
+                    f"{request}\n\nDeterministic request facts:\n{json.dumps(request_data, default=str)}",
+                )
             ),
         },
     ]
@@ -92,7 +97,10 @@ def run_single_agent(request: str, request_data: dict | None = None) -> Procurem
                     {
                         "role": "tool",
                         "tool_call_id": value(tool_call, "id"),
-                        "content": execute_tool_call(tool_call, pinned=request_facts(request_data)),
+                        "content": untrusted_block(
+                            "tool result",
+                            execute_tool_call(tool_call, pinned=request_facts(request_data)),
+                        ),
                     }
                 )
             continue
@@ -100,7 +108,11 @@ def run_single_agent(request: str, request_data: dict | None = None) -> Procurem
         for attempt in range(MAX_VALIDATION_RETRIES + 1):
             try:
                 output = parse_model(value(message, "content"), ProcurementOutput)
-                output = enforce_policy_floor(output, policy_result_from_messages(request, messages))
+                policy_result = policy_result_from_messages(request, messages)
+                if request_contains_injection(request, request_data):
+                    policy_result = policy_result or {"approvals_required": [], "risk_flags": []}
+                    policy_result.setdefault("risk_flags", []).append("prompt_injection_detected")
+                output = enforce_policy_floor(output, policy_result)
                 if request_data is not None and guardrails_enabled():
                     output = apply_policy_floor(output, evaluate_request(request_data))
                 return output
@@ -130,3 +142,14 @@ def run_single_agent(request: str, request_data: dict | None = None) -> Procurem
         raise RuntimeError(f"Final output validation failed: {validation_error}")
 
     raise RuntimeError(f"Single-agent orchestration exceeded {MAX_ITERATIONS} iterations")
+
+
+def run_single_agent(request: str, request_data: dict | None = None) -> ProcurementOutput:
+    try:
+        return _run_single_agent(request, request_data)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).exception("Single-agent execution failed")
+        floor = evaluate_request(request_data) if request_data is not None else None
+        flag = "llm_output_invalid" if isinstance(exc, (ValidationError, ValueError)) else "llm_unavailable"
+        return failure_output(flag, request_data=request_data, floor=floor)
