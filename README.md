@@ -14,7 +14,7 @@ cp .env.example .env
 ./run.sh
 ```
 
-Before starting, confirm that `.env` contains the provider key, `MODEL_NAME`, and `OPENAI_BASE_URL`; `run.sh` installs `requirements.txt` and is the supported one-command startup path. It starts Streamlit with browser auto-opening and usage-stat prompts disabled. Open the URL printed by Streamlit. The dashboard supports preloaded evaluation cases or a custom request, Single Agent or Staged Two-Agent execution, evidence inspection, and session-only Approve/Reject/Override review actions.
+Before starting, confirm that `.env` contains the provider key, `MODEL_NAME`, and `OPENAI_BASE_URL`; `run.sh` installs `requirements.txt`, starts the local vendor-risk mock API on port 8001, and is the supported one-command startup path. It then starts Streamlit with browser auto-opening and usage-stat prompts disabled. Open the URL printed by Streamlit. The dashboard supports preloaded evaluation cases or a custom request, Single Agent or Staged Two-Agent execution, evidence inspection, and session-only Approve/Reject/Override review actions.
 
 Product workflow: **request intake → Pandas/API evidence gathering → deterministic budget and policy checks → structured recommendation → human review**. See [`docs/architecture_workflow.md`](docs/architecture_workflow.md) for the architecture diagram and assumptions.
 
@@ -58,7 +58,7 @@ Both agent architectures use explicit pure-Python `while` loops. The loop sends 
 - prompt injection;
 - new-vendor legal review.
 
-Run `PYTHONPATH=. .venv/bin/python evaluation/evaluator.py` to execute both architectures against the exact same cases, compare each recommendation with its golden label, validate tool-grounded evidence, policy compliance, human-review correctness, and next-action presence, count LLM/tool calls, measure latency, print a Markdown summary, and write `evaluation/benchmark_results.json`. The committed artifact passed 10/10 cases for each architecture across all checks. Its rows are marked `offline_stub`; they are orchestration metrics, not live provider latency. With a configured key, the evaluator can run through the OpenAI-compatible provider. See [`docs/architecture_decision_memo.md`](docs/architecture_decision_memo.md) for the evidence-based ship decision and tradeoffs.
+Run `PYTHONPATH=. .venv/bin/python evaluation/evaluator.py` to execute both architectures against the exact same cases, compare each recommendation with its golden label, validate tool-grounded evidence, policy compliance, human-review correctness, and next-action presence, count LLM/tool calls, measure latency, print a Markdown summary, and write `evaluation/benchmark_results.json`. The committed artifact passed 10/10 cases for each architecture across all checks. Its top-level metadata identifies the execution mode, generation time, and git commit; rows marked `offline_stub` are orchestration metrics, not live provider latency. With a configured key, the evaluator can run through the OpenAI-compatible provider and records provider call counts when completed. See [`docs/architecture_decision_memo.md`](docs/architecture_decision_memo.md) for limitations and tradeoffs.
 
 Initial offline comparison:
 
@@ -97,4 +97,4 @@ All data is synthetic and small enough to load into memory. The committed benchm
 
 ## Final ship decision
 
-Ship the **Staged Two-Agent** architecture: the Analyst separates evidence collection from the Reviewer’s deterministic policy decision, improving auditability for sensitive procurement cases. Keep Single Agent as the lower-cost fallback for simpler requests. Both passed 10/10 benchmark cases; staged used one additional LLM call per case and measured lower local orchestration latency in this offline run.
+Use **Single Agent as the default**: it uses one fewer model call and has the smaller failure surface. Keep Staged Two-Agent as an experimental/audit-oriented option until a repeated live-provider benchmark demonstrates equal or better correctness and latency. Both passed 10/10 in the offline fixture, but those results do not establish production model performance.

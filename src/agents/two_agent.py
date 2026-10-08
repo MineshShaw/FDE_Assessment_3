@@ -15,7 +15,7 @@ from src.agents._common import (
     policy_result_from_request,
     value,
 )
-from src.llm_client import MODEL_NAME, client, sanitize_messages
+from src.llm_client import MODEL_NAME, chat_completion_with_retry, client, sanitize_messages
 from src.schemas import ProcurementOutput, StructuredEvidencePack
 from src.tools import evaluate_policy_rules
 
@@ -71,7 +71,7 @@ def _run_analyst(request: str) -> StructuredEvidencePack:
         if request_kwargs.get("tool_choice") == "none":
             request_kwargs["response_format"] = {"type": "json_object"}
         request_kwargs["messages"] = sanitize_messages(messages)
-        response = client.chat.completions.create(**request_kwargs)
+        response = chat_completion_with_retry(client, **request_kwargs)
         message = message_from_response(response)
         tool_calls = value(message, "tool_calls", None)
         append_assistant_message(messages, message)
@@ -102,7 +102,8 @@ def _run_analyst(request: str) -> StructuredEvidencePack:
                         ),
                     }
                 )
-                retry_response = client.chat.completions.create(
+                retry_response = chat_completion_with_retry(
+                    client,
                     model=MODEL_NAME,
                     messages=sanitize_messages(messages),
                     tool_choice="none",
@@ -117,7 +118,7 @@ def _run_analyst(request: str) -> StructuredEvidencePack:
 
 def run_two_agent(request: str) -> ProcurementOutput:
     if client is None:
-        raise RuntimeError("OPENAI_API_KEY is required to run the two-agent architecture")
+        raise RuntimeError("GROQ_API_KEY or OPENAI_API_KEY is required to run the two-agent architecture")
     evidence_pack = _run_analyst(request)
     reviewer_system_prompt = (
         "You are the Policy Risk Reviewer, an analytical agent. Review the request and evidence pack. "
@@ -170,7 +171,8 @@ def run_two_agent(request: str) -> ProcurementOutput:
         {"role": "system", "content": reviewer_system_prompt},
         {"role": "user", "content": reviewer_user_prompt},
     ]
-    response = client.chat.completions.create(
+    response = chat_completion_with_retry(
+        client,
         model=MODEL_NAME,
         messages=sanitize_messages(reviewer_messages),
         tool_choice="none",
@@ -195,7 +197,8 @@ def run_two_agent(request: str) -> ProcurementOutput:
                     ),
                 }
             )
-            retry_response = client.chat.completions.create(
+            retry_response = chat_completion_with_retry(
+                client,
                 model=MODEL_NAME,
                 messages=sanitize_messages(reviewer_messages),
                 tool_choice="none",

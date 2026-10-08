@@ -12,7 +12,7 @@ from src.agents._common import (
     policy_result_from_messages,
     value,
 )
-from src.llm_client import MODEL_NAME, client, sanitize_messages
+from src.llm_client import MODEL_NAME, chat_completion_with_retry, client, sanitize_messages
 from src.schemas import ProcurementOutput
 
 
@@ -22,7 +22,7 @@ MAX_VALIDATION_RETRIES = 2
 
 def run_single_agent(request: str) -> ProcurementOutput:
     if client is None:
-        raise RuntimeError("OPENAI_API_KEY is required to run the single-agent architecture")
+        raise RuntimeError("GROQ_API_KEY or OPENAI_API_KEY is required to run the single-agent architecture")
     messages: list[dict] = [
         {
             "role": "system",
@@ -70,7 +70,7 @@ def run_single_agent(request: str) -> ProcurementOutput:
         if request_kwargs.get("tool_choice") == "none":
             request_kwargs["response_format"] = {"type": "json_object"}
         request_kwargs["messages"] = sanitize_messages(messages)
-        response = client.chat.completions.create(**request_kwargs)
+        response = chat_completion_with_retry(client, **request_kwargs)
         message = message_from_response(response)
         tool_calls = value(message, "tool_calls", None)
         append_assistant_message(messages, message)
@@ -108,7 +108,7 @@ def run_single_agent(request: str) -> ProcurementOutput:
                     "tool_choice": "none",
                     "response_format": {"type": "json_object"},
                 }
-                retry_response = client.chat.completions.create(**retry_kwargs)
+                retry_response = chat_completion_with_retry(client, **retry_kwargs)
                 retry_message = message_from_response(retry_response)
                 append_assistant_message(messages, retry_message)
                 message = retry_message

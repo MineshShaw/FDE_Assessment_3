@@ -6,3 +6,5 @@ pytest
 python-dotenv
 fastapi
 uvicorn
+requests
+httpx

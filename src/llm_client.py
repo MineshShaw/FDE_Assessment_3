@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any
 
 from dotenv import load_dotenv
@@ -83,3 +84,22 @@ def create_client() -> OpenAI:
 
 client = create_client() if (os.getenv("GROQ_API_KEY") or os.getenv("OPENAI_API_KEY")) else None
 MODEL_NAME = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
+
+
+def chat_completion_with_retry(active_client: Any, **kwargs: Any) -> Any:
+    """Call an OpenAI-compatible provider with bounded retry/backoff."""
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            return active_client.chat.completions.create(**kwargs)
+        except Exception as exc:
+            last_error = exc
+            text = str(exc).casefold()
+            retryable = any(
+                marker in text
+                for marker in ("429", "rate limit", "timeout", "timed out", "temporarily unavailable")
+            )
+            if not retryable or attempt == 2:
+                raise
+            time.sleep(2**attempt)
+    raise RuntimeError(f"LLM request failed after retries: {last_error}")

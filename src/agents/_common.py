@@ -98,6 +98,8 @@ def parse_model(content: str | None, model_type: type[BaseModel]) -> BaseModel:
     if not content:
         raise ValueError("LLM response did not contain structured content")
     payload = extract_json_from_chatty_response(content)
+    if "error" in payload and payload.get("recommendation") == "ESCALATE_TO_HUMAN":
+        raise ValueError(payload["error"])
     return model_type.model_validate(payload)
 
 
@@ -203,12 +205,17 @@ def execute_tool_call(tool_call: Any) -> str:
     name = value(function, "name")
     arguments = value(function, "arguments", "{}")
     if name not in TOOL_FUNCTIONS:
-        raise ValueError(f"Unsupported tool requested by model: {name}")
+        return json.dumps({"error": f"Unsupported tool requested by model: {name}"})
     try:
         kwargs = json.loads(arguments) if isinstance(arguments, str) else arguments
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid arguments for tool {name}") from exc
-    result = TOOL_FUNCTIONS[name](**kwargs)
+    except json.JSONDecodeError:
+        return json.dumps({"error": f"Invalid arguments for tool {name}"})
+    if not isinstance(kwargs, dict):
+        return json.dumps({"error": f"Arguments for tool {name} must be an object"})
+    try:
+        result = TOOL_FUNCTIONS[name](**kwargs)
+    except Exception as exc:
+        return json.dumps({"error": f"Tool {name} failed: {exc}"})
     return json.dumps(result, default=str)
 
 

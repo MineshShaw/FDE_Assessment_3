@@ -95,6 +95,37 @@ def test_json_extractor_returns_structured_error() -> None:
     assert extract_json_from_chatty_response("not json")["error"]
 
 
+def test_unknown_or_malformed_tool_calls_return_error_envelopes() -> None:
+    from src.agents._common import execute_tool_call
+
+    assert "error" in json.loads(
+        execute_tool_call(_tool_call("send_payment", {}))
+    )
+    malformed = SimpleNamespace(
+        function=SimpleNamespace(name="check_budget", arguments="{bad json")
+    )
+    assert "error" in json.loads(execute_tool_call(malformed))
+
+
+def test_chat_completion_retries_rate_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src import llm_client
+
+    calls = {"count": 0}
+
+    def create(**kwargs):
+        calls["count"] += 1
+        if calls["count"] < 3:
+            raise RuntimeError("HTTP 429 rate limit")
+        return "ok"
+
+    monkeypatch.setattr(llm_client.time, "sleep", lambda seconds: None)
+    active_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
+    assert llm_client.chat_completion_with_retry(active_client, model="test") == "ok"
+    assert calls["count"] == 3
+
+
 def test_schemas_supply_defaults_and_coerce_single_overlap() -> None:
     assert ProcurementOutput(recommendation="APPROVE").next_step == "Manual review required."
     pack = StructuredEvidencePack(tool_overlap={"name": "TaskFlow"})
