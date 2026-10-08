@@ -47,7 +47,7 @@ Both agent architectures use explicit pure-Python `while` loops. The loop sends 
 
 ## Evaluation
 
-`evaluation/test_cases.json` contains 10 cases covering:
+`evaluation/gold_cases.json` contains 16 policy-derived cases: the 10 request records plus four threshold boundary cases, an unknown-requester case, and a prompt-injection case. Gold expectations cite the policy and are scored independently from `evaluate_request`; disagreements should be reviewed rather than silently rewritten.
 
 - normal and low-value requests;
 - missing user counts;
@@ -58,17 +58,9 @@ Both agent architectures use explicit pure-Python `while` loops. The loop sends 
 - prompt injection;
 - new-vendor legal review.
 
-Run `PYTHONPATH=. .venv/bin/python evaluation/evaluator.py` to execute both architectures against the exact same cases, compare each recommendation with its golden label, validate tool-grounded evidence, policy compliance, human-review correctness, and next-action presence, count LLM/tool calls, measure latency, print a Markdown summary, and write `evaluation/benchmark_results.json`. The committed artifact passed 10/10 cases for each architecture across all checks. Its top-level metadata identifies the execution mode, generation time, and git commit; rows marked `offline_stub` are orchestration metrics, not live provider latency. With a configured key, the evaluator can run through the OpenAI-compatible provider and records provider call counts when completed. See [`docs/architecture_decision_memo.md`](docs/architecture_decision_memo.md) for limitations and tradeoffs.
+Run `PYTHONPATH=. .venv/bin/python evaluation/evaluator.py --runs 3 --sleep 2` with `GROQ_API_KEY` or `OPENAI_API_KEY` configured to execute both architectures against identical request data, include the policy-engine baseline, validate exact approvals/risk flags/evidence grounding, count LLM/tool calls, measure latency, print a Markdown summary, and write timestamped results under `evaluation/results/`. Normal mode fails without credentials; `--offline-smoke` only checks plumbing and writes no benchmark results. Live results should be regenerated before submission and are never substituted with fixture outputs.
 
-Initial offline comparison:
-
-| Metric | Single Agent | Staged Two-Agent |
-|---|---:|---:|
-| Cases passing | 10/10 | 10/10 |
-| Average LLM calls | 2.0 | 3.0 |
-| Average tool calls | 1.0 | 1.0 |
-| Average latency in committed artifact | 1.47 ms | 0.76 ms |
-| Primary tradeoff | Lower cost and simpler flow | Stronger evidence/reviewer separation |
+There is intentionally no shipping comparison table here until a repeated live-provider run completes. Offline smoke is not a benchmark and must not be used as latency or reliability evidence.
 
 The original public contract adapter remains available through:
 
