@@ -69,6 +69,11 @@ python evals/run_public_evals.py --architecture single
 python evals/run_public_evals.py --architecture staged
 ```
 
+With no provider key, `handle_request` uses the deterministic policy engine.
+When a key is configured, it invokes the selected agent, combines its evidence
+with the deterministic policy floor, and records LLM/tool telemetry; failures
+fall back to the floor with `llm_unavailable`.
+
 ## Repository layout
 
 ```text
@@ -82,6 +87,10 @@ ui/app.py             Streamlit dashboard
 run.sh                One-command headless launcher
 tests/                Data, tool, and orchestration tests
 ```
+
+`app.py` and `run_local.py` are legacy starter-pack entry points and are not
+used by `run.sh`, the active dashboard, or the current evaluation commands.
+`templates/` contains legacy submission templates retained for reference.
 
 ## Assumptions and known limitations
 

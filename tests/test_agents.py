@@ -123,17 +123,74 @@ def test_pinned_tool_arguments_override_model_values() -> None:
     assert result["requested_amount"] == 18000
 
 
-def test_evaluate_request_preserves_handle_request_outputs() -> None:
+def test_evaluate_request_preserves_handle_request_outputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from src.data_access import get_request
     from src.solution import evaluate_request, handle_request
+    from src.agents import single_agent, two_agent
 
     import json as _json
+    monkeypatch.setattr(single_agent, "client", None)
+    monkeypatch.setattr(two_agent, "client", None)
+    monkeypatch.setenv("GROQ_API_KEY", "")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
 
     requests = _json.loads((__import__("pathlib").Path("data/requests.json")).read_text())
     for request in requests:
         before = handle_request(request["request_id"]).model_dump()
         after = evaluate_request(get_request(request["request_id"])).model_dump()
         assert before == after
+
+
+def test_handle_request_uses_selected_agent_and_combines_telemetry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.agents import single_agent, two_agent
+    from src.solution import handle_request
+    from src.telemetry import RunTelemetryCounter
+
+    monkeypatch.setattr(single_agent, "client", object())
+    monkeypatch.setattr(two_agent, "client", object())
+    monkeypatch.setattr(
+        single_agent,
+        "last_telemetry",
+        RunTelemetryCounter(llm_calls=2, tool_calls=1, tool_names=["budget"]),
+    )
+    monkeypatch.setattr(
+        two_agent,
+        "last_telemetry",
+        RunTelemetryCounter(llm_calls=3, tool_calls=2, tool_names=["catalog", "vendor"]),
+    )
+    monkeypatch.setattr(
+        single_agent,
+        "run_single_agent",
+        lambda request, request_data=None: ProcurementOutput(
+            recommendation="ESCALATE_TO_HUMAN",
+            evidence=["single-agent finding"],
+            next_step="Review.",
+        ),
+    )
+    monkeypatch.setattr(
+        two_agent,
+        "run_two_agent",
+        lambda request, request_data=None: ProcurementOutput(
+            recommendation="ESCALATE_TO_HUMAN",
+            evidence=["staged-agent finding"],
+            next_step="Review.",
+        ),
+    )
+    monkeypatch.setenv("GROQ_API_KEY", "test")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+
+    single = handle_request("REQ-1001", architecture="single")
+    staged = handle_request("REQ-1001", architecture="staged")
+
+    assert any(item.source == "agent" for item in single.evidence)
+    assert any(item.source == "agent" for item in staged.evidence)
+    assert single.telemetry.llm_calls == 2
+    assert staged.telemetry.llm_calls == 3
+    assert single.telemetry.tool_calls != staged.telemetry.tool_calls
 
 
 def test_request_data_guardrail_forces_request_info_and_injection_flag(monkeypatch: pytest.MonkeyPatch) -> None:

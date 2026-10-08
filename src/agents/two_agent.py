@@ -24,10 +24,12 @@ from src.schemas import ProcurementOutput, StructuredEvidencePack
 from src.tools import evaluate_policy_rules
 from src.guardrails import apply_policy_floor, guardrails_enabled
 from src.solution import evaluate_request
+from src.telemetry import RunTelemetryCounter
 
 
 MAX_ITERATIONS = 10
 MAX_VALIDATION_RETRIES = 2
+last_telemetry = RunTelemetryCounter()
 
 
 def _run_analyst(request: str, request_data: dict | None = None) -> StructuredEvidencePack:
@@ -89,11 +91,15 @@ def _run_analyst(request: str, request_data: dict | None = None) -> StructuredEv
             request_kwargs["response_format"] = {"type": "json_object"}
         request_kwargs["messages"] = sanitize_messages(messages)
         response = chat_completion_with_retry(client, **request_kwargs)
+        last_telemetry.record_llm_call()
         message = message_from_response(response)
         tool_calls = value(message, "tool_calls", None)
         append_assistant_message(messages, message)
         if tool_calls:
             for tool_call in tool_calls:
+                last_telemetry.record_tool_call(
+                    value(value(tool_call, "function", {}), "name", "unknown")
+                )
                 tool_result = execute_tool_call(tool_call, pinned=request_facts(request_data))
                 injection_detected = injection_detected or detect_injection(tool_result)
                 messages.append(
@@ -142,6 +148,8 @@ def _run_analyst(request: str, request_data: dict | None = None) -> StructuredEv
 
 
 def _run_two_agent(request: str, request_data: dict | None = None) -> ProcurementOutput:
+    global last_telemetry
+    last_telemetry = RunTelemetryCounter()
     if client is None:
         raise RuntimeError("GROQ_API_KEY or OPENAI_API_KEY is required to run the two-agent architecture")
     evidence_pack = _run_analyst(request, request_data=request_data)
@@ -217,6 +225,7 @@ def _run_two_agent(request: str, request_data: dict | None = None) -> Procuremen
         tool_choice="none",
         response_format={"type": "json_object"},
     )
+    last_telemetry.record_llm_call()
     message = message_from_response(response)
     validation_error: Exception | None = None
     for attempt in range(MAX_VALIDATION_RETRIES + 1):
@@ -246,6 +255,7 @@ def _run_two_agent(request: str, request_data: dict | None = None) -> Procuremen
                 tool_choice="none",
                 response_format={"type": "json_object"},
             )
+            last_telemetry.record_llm_call()
             message = message_from_response(retry_response)
     return ProcurementOutput(recommendation="ESCALATE_TO_HUMAN")
 

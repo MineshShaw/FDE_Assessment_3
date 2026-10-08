@@ -1,8 +1,8 @@
 """Shared package initialization for the assessment starter pack.
 
 A local .env file is loaded automatically (without overriding variables already
-set by the operating system). This keeps `python run_local.py`, the public eval
-runner, and direct module usage consistent.
+set by the operating system). This keeps `./run.sh`, the public eval runner,
+and direct module usage consistent.
 """
 from __future__ import annotations
 

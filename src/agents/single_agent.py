@@ -21,13 +21,17 @@ from src.llm_client import MODEL_NAME, chat_completion_with_retry, client, sanit
 from src.schemas import ProcurementOutput
 from src.guardrails import apply_policy_floor, guardrails_enabled
 from src.solution import evaluate_request
+from src.telemetry import RunTelemetryCounter
 
 
 MAX_ITERATIONS = 10
 MAX_VALIDATION_RETRIES = 2
+last_telemetry = RunTelemetryCounter()
 
 
 def _run_single_agent(request: str, request_data: dict | None = None) -> ProcurementOutput:
+    global last_telemetry
+    last_telemetry = RunTelemetryCounter()
     if client is None:
         raise RuntimeError("GROQ_API_KEY or OPENAI_API_KEY is required to run the single-agent architecture")
     messages: list[dict] = [
@@ -88,11 +92,15 @@ def _run_single_agent(request: str, request_data: dict | None = None) -> Procure
             request_kwargs["response_format"] = {"type": "json_object"}
         request_kwargs["messages"] = sanitize_messages(messages)
         response = chat_completion_with_retry(client, **request_kwargs)
+        last_telemetry.record_llm_call()
         message = message_from_response(response)
         tool_calls = value(message, "tool_calls", None)
         append_assistant_message(messages, message)
         if tool_calls:
             for tool_call in tool_calls:
+                last_telemetry.record_tool_call(
+                    value(value(tool_call, "function", {}), "name", "unknown")
+                )
                 messages.append(
                     {
                         "role": "tool",
@@ -136,6 +144,7 @@ def _run_single_agent(request: str, request_data: dict | None = None) -> Procure
                     "response_format": {"type": "json_object"},
                 }
                 retry_response = chat_completion_with_retry(client, **retry_kwargs)
+                last_telemetry.record_llm_call()
                 retry_message = message_from_response(retry_response)
                 append_assistant_message(messages, retry_message)
                 message = retry_message

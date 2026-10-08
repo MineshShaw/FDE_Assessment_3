@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import os
 
 import pandas as pd
 from requests import RequestException
@@ -300,5 +301,61 @@ def evaluate_request(request: dict, architecture: Architecture = "single") -> Pr
 
 
 def handle_request(request_id: str, architecture: Architecture = "single") -> ProcurementDecision:
-    """Load a request record and evaluate it with the deterministic policy engine."""
-    return evaluate_request(get_request(request_id), architecture=architecture)
+    """Evaluate a request with the selected agent when configured, else use the policy engine."""
+    request = get_request(request_id)
+    floor = evaluate_request(request, architecture=architecture)
+
+    from src.agents import single_agent, two_agent
+
+    selected = single_agent if architecture == "single" else two_agent
+    if not (
+        os.getenv("GROQ_API_KEY")
+        or os.getenv("OPENAI_API_KEY")
+        or selected.client is not None
+    ):
+        return floor
+
+    try:
+        output = (
+            selected.run_single_agent(request["business_justification"], request_data=request)
+            if architecture == "single"
+            else selected.run_two_agent(request["business_justification"], request_data=request)
+        )
+        telemetry = selected.last_telemetry
+        agent_evidence = [
+            {"source": "agent", "finding": item, "reference": request_id}
+            for item in output.evidence
+        ]
+        combined_evidence = floor.evidence + agent_evidence
+        return ProcurementDecision(
+            request_id=request_id,
+            recommendation=output.recommendation,
+            evidence=combined_evidence,
+            required_approvals=list(dict.fromkeys(floor.required_approvals + output.approvals_required)),
+            missing_information=list(dict.fromkeys(floor.missing_information + output.missing_information)),
+            risk_flags=list(dict.fromkeys(floor.risk_flags + output.risk_flags)),
+            next_step=output.next_step,
+            human_review_required=True,
+            telemetry={
+                "llm_calls": telemetry.llm_calls,
+                "tool_calls": telemetry.tool_calls + floor.telemetry.tool_calls,
+                "tool_names": list(dict.fromkeys(
+                    floor.telemetry.tool_names + telemetry.tool_names
+                )),
+            },
+        )
+    except Exception:
+        return floor.model_copy(
+            update={
+                "risk_flags": list(dict.fromkeys(floor.risk_flags + ["llm_unavailable"])),
+                "telemetry": {
+                    "llm_calls": getattr(selected.last_telemetry, "llm_calls", 0),
+                    "tool_calls": floor.telemetry.tool_calls
+                    + getattr(selected.last_telemetry, "tool_calls", 0),
+                    "tool_names": list(dict.fromkeys(
+                        floor.telemetry.tool_names
+                        + getattr(selected.last_telemetry, "tool_names", [])
+                    )),
+                },
+            }
+        )
