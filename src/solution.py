@@ -125,7 +125,7 @@ def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
     return any(term in lowered for term in terms)
 
 
-def handle_request(request_id: str, architecture: Architecture = "single") -> ProcurementDecision:
+def evaluate_request(request: dict, architecture: Architecture = "single") -> ProcurementDecision:
     """Evaluate a procurement request using deterministic policy checks.
 
     Both supported architectures share the same policy engine. The staged
@@ -135,7 +135,7 @@ def handle_request(request_id: str, architecture: Architecture = "single") -> Pr
     if architecture not in ("single", "staged"):
         raise ValueError(f"Unsupported architecture: {architecture}")
 
-    request = get_request(request_id)
+    request_id = str(request.get("request_id", "UNKNOWN"))
     telemetry = RunTelemetryCounter()
     evidence: list[dict] = []
     risk_flags: list[str] = []
@@ -297,3 +297,8 @@ def handle_request(request_id: str, architecture: Architecture = "single") -> Pr
             "tool_names": telemetry.tool_names,
         },
     )
+
+
+def handle_request(request_id: str, architecture: Architecture = "single") -> ProcurementDecision:
+    """Load a request record and evaluate it with the deterministic policy engine."""
+    return evaluate_request(get_request(request_id), architecture=architecture)

@@ -107,6 +107,64 @@ def test_unknown_or_malformed_tool_calls_return_error_envelopes() -> None:
     assert "error" in json.loads(execute_tool_call(malformed))
 
 
+def test_pinned_tool_arguments_override_model_values() -> None:
+    from src.agents._common import execute_tool_call
+
+    result = json.loads(
+        execute_tool_call(
+            _tool_call(
+                "check_budget",
+                {"department_id": "E002", "amount": 1},
+            ),
+            pinned={"department_id": "Engineering", "amount": 18000},
+        )
+    )
+    assert result["department"] == "Engineering"
+    assert result["requested_amount"] == 18000
+
+
+def test_evaluate_request_preserves_handle_request_outputs() -> None:
+    from src.data_access import get_request
+    from src.solution import evaluate_request, handle_request
+
+    import json as _json
+
+    requests = _json.loads((__import__("pathlib").Path("data/requests.json")).read_text())
+    for request in requests:
+        before = handle_request(request["request_id"]).model_dump()
+        after = evaluate_request(get_request(request["request_id"])).model_dump()
+        assert before == after
+
+
+def test_request_data_guardrail_forces_request_info_and_injection_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    response = _response(
+        {
+            "content": json.dumps(
+                {
+                    "recommendation": "APPROVE",
+                    "evidence": [],
+                    "approvals_required": [],
+                    "missing_information": [],
+                    "risk_flags": [],
+                    "next_step": "Approve.",
+                }
+            ),
+            "tool_calls": None,
+        }
+    )
+    monkeypatch.setattr(
+        single_agent,
+        "client",
+        SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kwargs: response))),
+    )
+    from src.data_access import get_request
+
+    request_data = get_request("REQ-1006")
+    result = single_agent.run_single_agent("untrusted request", request_data=request_data)
+    assert result.recommendation == "REQUEST_INFO"
+    assert "prompt_injection_detected" in result.risk_flags
+
+
 def test_chat_completion_retries_rate_limits(monkeypatch: pytest.MonkeyPatch) -> None:
     from src import llm_client
 

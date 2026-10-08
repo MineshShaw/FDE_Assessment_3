@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Callable
 from typing import Any
@@ -14,6 +15,10 @@ from src.tools import (
     get_vendor_security_status,
     search_software_catalog,
 )
+from src.data_access import load_employees
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 TOOL_SCHEMAS = [
@@ -156,7 +161,13 @@ def policy_result_from_messages(request: str, messages: list[dict]) -> dict | No
 def policy_result_from_request(request: str, *, vendor_risk: str = "unknown") -> dict:
     """Evaluate policy from request text without trusting model-generated fields."""
     amount_match = re.search(r"\$([\d,]+(?:\.\d+)?)", request)
-    amount = float(amount_match.group(1).replace(",", "")) if amount_match else 0.0
+    if not amount_match:
+        return {
+            "error": "amount not established",
+            "risk_flags": ["policy_unverified"],
+            "approvals_required": [],
+        }
+    amount = float(amount_match.group(1).replace(",", ""))
     return policy_result_from_messages(
         request,
         [
@@ -172,7 +183,7 @@ def policy_result_from_request(request: str, *, vendor_risk: str = "unknown") ->
 
 def enforce_policy_floor(output: BaseModel, policy_result: dict | None) -> BaseModel:
     """Prevent model output from weakening deterministic approval requirements."""
-    if not policy_result or "error" in policy_result:
+    if not policy_result:
         return output
     approvals = list(dict.fromkeys(output.approvals_required + policy_result.get("approvals_required", [])))
     risk_flags = list(dict.fromkeys(output.risk_flags + policy_result.get("risk_flags", [])))
@@ -200,7 +211,7 @@ def enforce_policy_floor(output: BaseModel, policy_result: dict | None) -> BaseM
     )
 
 
-def execute_tool_call(tool_call: Any) -> str:
+def execute_tool_call(tool_call: Any, pinned: dict | None = None) -> str:
     function = value(tool_call, "function", {})
     name = value(function, "name")
     arguments = value(function, "arguments", "{}")
@@ -212,11 +223,40 @@ def execute_tool_call(tool_call: Any) -> str:
         return json.dumps({"error": f"Invalid arguments for tool {name}"})
     if not isinstance(kwargs, dict):
         return json.dumps({"error": f"Arguments for tool {name} must be an object"})
+    if pinned:
+        applicable = {
+            "check_budget": ("department_id", "amount"),
+            "get_vendor_security_status": ("vendor_name",),
+            "evaluate_policy_rules": ("amount", "data_classification"),
+        }.get(name, ())
+        for key in applicable:
+            if key in pinned and key in kwargs and kwargs[key] != pinned[key]:
+                LOGGER.warning("Overriding model tool argument %s for %s with deterministic request fact", key, name)
+            if key in pinned:
+                kwargs[key] = pinned[key]
     try:
         result = TOOL_FUNCTIONS[name](**kwargs)
     except Exception as exc:
         return json.dumps({"error": f"Tool {name} failed: {exc}"})
     return json.dumps(result, default=str)
+
+
+def request_facts(request_data: dict | None) -> dict | None:
+    if request_data is None:
+        return None
+    employees = load_employees()
+    employee = employees[
+        employees["employee_id"].astype(str).str.casefold()
+        == str(request_data.get("requester_id", "")).casefold()
+    ]
+    facts = {
+        "amount": request_data.get("annual_cost_usd"),
+        "vendor_name": request_data.get("vendor_name"),
+        "data_classification": request_data.get("data_access_level", "internal"),
+    }
+    if not employee.empty:
+        facts["department_id"] = str(employee.iloc[0]["department"])
+    return {key: value for key, value in facts.items() if value is not None}
 
 
 def append_assistant_message(messages: list[dict], message: Any) -> None:
